@@ -1,0 +1,3 @@
+rust_root: "core_rust"
+rust_input: "crate::api"
+dart_output: "lib/src/rust"
