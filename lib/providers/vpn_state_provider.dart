@@ -55,34 +55,26 @@ final subscriptionUrlProvider = StateProvider<String>((ref) {
 
 // --- 阶段四 4.2 新增：Mock 节点池 ---
 final entryPoolProvider = StateProvider<List<ProxyNode>>((ref) {
-  return [
-    const ProxyNode(id: 'entry_1', name: '香港 01', protocol: ProxyProtocol.socks5, server: 'hk1.example.com', port: 1080, password: 'pwd', cipher: null),
-    const ProxyNode(id: 'entry_2', name: '日本 01', protocol: ProxyProtocol.shadowsocks, server: 'jp1.example.com', port: 8388, password: 'pwd', cipher: 'aes-256-gcm'),
-    const ProxyNode(id: 'entry_3', name: '新加坡 01', protocol: ProxyProtocol.trojan, server: 'sg1.example.com', port: 443, password: 'pwd', cipher: null),
-  ];
+  return ConfigManager.getEntryNodesList();
 });
 
 final exitPoolProvider = StateProvider<List<ProxyNode>>((ref) {
-  final saved = ConfigManager.getExitNodesList();
-  if (saved.isNotEmpty) return saved;
-  return [
-    const ProxyNode(id: 'exit_1', name: '美国 ISP 01', protocol: ProxyProtocol.socks5, server: 'us1.example.com', port: 1080, password: 'pwd', cipher: null),
-    const ProxyNode(id: 'exit_2', name: '英国 ISP 01', protocol: ProxyProtocol.shadowsocks, server: 'uk1.example.com', port: 8388, password: 'pwd', cipher: 'aes-256-gcm'),
-    const ProxyNode(id: 'exit_3', name: '台湾 ISP 01', protocol: ProxyProtocol.vmess, server: 'tw1.example.com', port: 443, password: 'pwd', cipher: null),
-  ];
+  return ConfigManager.getExitNodesList();
 });
 
 // --- 阶段四 4.2 新增：选中的节点状态 ---
 final selectedEntryNodeProvider = StateProvider<ProxyNode?>((ref) {
   final saved = ConfigManager.getEntryNode();
   if (saved != null) return saved;
-  return ref.read(entryPoolProvider).first;
+  final pool = ref.read(entryPoolProvider);
+  return pool.isNotEmpty ? pool.first : null;
 });
 
 final selectedExitNodeProvider = StateProvider<ProxyNode?>((ref) {
   final saved = ConfigManager.getExitNode();
   if (saved != null) return saved;
-  return ref.read(exitPoolProvider).first;
+  final pool = ref.read(exitPoolProvider);
+  return pool.isNotEmpty ? pool.first : null;
 });
 
 // 监听状态变化并保存到本地
@@ -97,6 +89,10 @@ void setupConfigListeners(ProviderContainer container) {
   
   container.listen(exitPoolProvider, (previous, next) {
     ConfigManager.saveExitNodesList(next);
+  });
+  
+  container.listen(entryPoolProvider, (previous, next) {
+    ConfigManager.saveEntryNodesList(next);
   });
   
   container.listen(subscriptionUrlProvider, (previous, next) {

@@ -12,6 +12,7 @@ class ConfigManager {
   static const String _entryNodeKey = 'vpn_entry_node';
   static const String _exitNodeKey = 'vpn_exit_node';
   static const String _exitNodesListKey = 'vpn_exit_nodes_list';
+  static const String _entryNodesListKey = 'vpn_entry_nodes_list';
   static const String _subscriptionUrlKey = 'vpn_subscription_url';
 
   // --- ProxyNode JSON Serialization Helpers ---
@@ -74,6 +75,26 @@ class ConfigManager {
       }
     }
     return null;
+  }
+
+  // --- Entry Nodes List (from Subscription) ---
+
+  static Future<void> saveEntryNodesList(List<ProxyNode> nodes) async {
+    final jsonList = nodes.map((n) => proxyNodeToJson(n)).toList();
+    await _prefs.setString(_entryNodesListKey, jsonEncode(jsonList));
+  }
+
+  static List<ProxyNode> getEntryNodesList() {
+    final data = _prefs.getString(_entryNodesListKey);
+    if (data != null) {
+      try {
+        final List<dynamic> jsonList = jsonDecode(data);
+        return jsonList.map((json) => proxyNodeFromJson(json)).toList();
+      } catch (e) {
+        // Fallback or ignore on parse error
+      }
+    }
+    return [];
   }
 
   // --- Exit Nodes List (from Subscription) ---
