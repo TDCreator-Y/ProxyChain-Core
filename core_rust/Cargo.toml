@@ -9,6 +9,7 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 flutter_rust_bridge = "=2.12.0"
 ipstack = "1.0.0"
+smoltcp = { version = "0.12.0", default-features = false, features = ["std", "proto-ipv4", "proto-ipv6"] }
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.43", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tun = { version = "0.8.10", features = ["async"] }

@@ -85,6 +85,7 @@ pub fn create_mock_chain() -> ProxyChain {
 
 #[flutter_rust_bridge::frb(sync)]
 pub fn stop_engine() {
+    crate::api::tun_proxy::stop_tun();
     if let Some(handle) = ENGINE_TASK.lock().unwrap().take() {
         handle.abort();
     }
@@ -241,37 +242,36 @@ pub(crate) async fn connect_via_chain(
     requested_target: &TargetAddr,
 ) -> Result<BoxProxyStream, String> {
     let exit_target = TargetAddr::Domain(chain.exit_node.server.clone(), chain.exit_node.port);
-    let mut entry_stream = connect_to_proxy_node(&chain.entry_node, &exit_target).await?;
-
-    if matches!(chain.entry_node.protocol, ProxyProtocol::Socks5) {
-        socks5_connect(&mut entry_stream, &exit_target).await?;
-    }
-
-    // The exit node is still a SOCKS5 hop. After the entry hop reaches it,
-    // perform a second SOCKS5 handshake before requesting the final target.
-    socks5_handshake(&mut entry_stream).await?;
-    socks5_connect(&mut entry_stream, requested_target).await?;
-    Ok(entry_stream)
+    let entry_addr = format!("{}:{}", chain.entry_node.server, chain.entry_node.port);
+    let entry_tcp = TcpStream::connect(&entry_addr)
+        .await
+        .map_err(|err| {
+            format!(
+                "failed to connect to entry proxy node {} ({}): {err}",
+                chain.entry_node.name, entry_addr
+            )
+        })?;
+    let entry_stream = handshake_proxy(entry_tcp, &chain.entry_node, &exit_target).await?;
+    handshake_proxy(entry_stream, &chain.exit_node, requested_target).await
 }
 
-async fn connect_to_proxy_node(
+async fn handshake_proxy<S>(
+    mut stream: S,
     node: &ProxyNode,
     target: &TargetAddr,
-) -> Result<BoxProxyStream, String> {
-    let addr = format!("{}:{}", node.server, node.port);
-    let stream = TcpStream::connect(&addr)
-        .await
-        .map_err(|err| format!("failed to connect to proxy node {} ({}): {err}", node.name, addr))?;
-
+) -> Result<BoxProxyStream, String>
+where
+    S: ProxyIoStream + 'static,
+{
     match &node.protocol {
         ProxyProtocol::Socks5 => {
-            let mut stream = stream;
             socks5_handshake(&mut stream).await?;
+            socks5_connect(&mut stream, target).await?;
             Ok(Box::new(stream))
         }
-        ProxyProtocol::Shadowsocks => connect_to_shadowsocks_node(stream, node, target),
+        ProxyProtocol::Shadowsocks => connect_to_shadowsocks_stream(stream, node, target),
         unsupported => Err(format!(
-            "protocol {:?} is not implemented yet for entry nodes",
+            "protocol {:?} is not implemented yet for proxy handshakes",
             unsupported
         )),
     }
@@ -312,8 +312,20 @@ fn validate_entry_protocol(node: &ProxyNode) -> Result<(), String> {
 fn validate_exit_protocol(node: &ProxyNode) -> Result<(), String> {
     match node.protocol {
         ProxyProtocol::Socks5 => Ok(()),
+        ProxyProtocol::Shadowsocks => {
+            let cipher = node
+                .cipher
+                .as_deref()
+                .ok_or_else(|| format!("shadowsocks node {} is missing cipher", node.name))?;
+            CipherKind::from_str(cipher)
+                .map_err(|err| format!("invalid shadowsocks cipher for {}: {err}", node.name))?;
+            if node.password.is_empty() {
+                return Err(format!("shadowsocks node {} is missing password", node.name));
+            }
+            Ok(())
+        }
         _ => Err(format!(
-            "protocol {:?} is not implemented yet for exit nodes; current chain expects a Socks5 exit",
+            "protocol {:?} is not implemented yet for exit nodes; only Socks5 and Shadowsocks are supported",
             node.protocol
         )),
     }
@@ -519,11 +531,14 @@ where
     Ok(Socks5Frame { command, target })
 }
 
-fn connect_to_shadowsocks_node(
-    stream: TcpStream,
+fn connect_to_shadowsocks_stream<S>(
+    stream: S,
     node: &ProxyNode,
     target: &TargetAddr,
-) -> Result<BoxProxyStream, String> {
+) -> Result<BoxProxyStream, String>
+where
+    S: ProxyIoStream + 'static,
+{
     let cipher = node
         .cipher
         .as_deref()
