@@ -14,7 +14,7 @@ class ChainBuilderScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('Chain Builder', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('代理链构建', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
@@ -28,7 +28,7 @@ class ChainBuilderScreen extends ConsumerWidget {
               child: _buildPoolColumn(
                 context, 
                 ref, 
-                title: 'Entry Pool', 
+                title: '入口节点 (VPN)', 
                 nodes: entryPool, 
                 isEntry: true
               ),
@@ -39,7 +39,7 @@ class ChainBuilderScreen extends ConsumerWidget {
               child: _buildPoolColumn(
                 context, 
                 ref, 
-                title: 'Exit Pool', 
+                title: '出口节点 (ISP)', 
                 nodes: exitPool, 
                 isEntry: false
               ),
@@ -136,12 +136,12 @@ class ChainBuilderScreen extends ConsumerWidget {
   // 简单的辅助函数，用来模拟国旗展示
   String _getFlag(String name) {
     final lower = name.toLowerCase();
-    if (lower.contains('hk') || lower.contains('hong kong')) return '🇭🇰';
-    if (lower.contains('jp') || lower.contains('japan')) return '🇯🇵';
-    if (lower.contains('sg') || lower.contains('singapore')) return '🇸🇬';
-    if (lower.contains('us') || lower.contains('united states')) return '🇺🇸';
-    if (lower.contains('uk') || lower.contains('united kingdom')) return '🇬🇧';
-    if (lower.contains('tw') || lower.contains('taiwan')) return '🇹🇼';
+    if (lower.contains('hk') || lower.contains('hong kong') || lower.contains('香港')) return '🇭🇰';
+    if (lower.contains('jp') || lower.contains('japan') || lower.contains('日本')) return '🇯🇵';
+    if (lower.contains('sg') || lower.contains('singapore') || lower.contains('新加坡')) return '🇸🇬';
+    if (lower.contains('us') || lower.contains('united states') || lower.contains('美国')) return '🇺🇸';
+    if (lower.contains('uk') || lower.contains('united kingdom') || lower.contains('英国')) return '🇬🇧';
+    if (lower.contains('tw') || lower.contains('taiwan') || lower.contains('台湾')) return '🇹🇼';
     return '🌐';
   }
 }

@@ -75,11 +75,11 @@ class _MainLayoutState extends State<MainLayout> {
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard),
-            label: 'Dashboard',
+            label: '总览',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.link),
-            label: 'Chain Builder',
+            label: '代理链构建',
           ),
         ],
       ),

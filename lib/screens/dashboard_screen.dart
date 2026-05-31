@@ -6,6 +6,38 @@ import '../widgets/traffic_chart.dart';
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
+  Future<void> _handleMainButtonTap(
+    BuildContext context,
+    WidgetRef ref,
+    VpnConnectionState state,
+  ) async {
+    try {
+      if (state == VpnConnectionState.disconnected) {
+        await ref.read(vpnStateProvider.notifier).connect();
+      } else if (state == VpnConnectionState.connected) {
+        await ref.read(vpnStateProvider.notifier).disconnect();
+      }
+    } catch (error) {
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(_formatErrorMessage(error)),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  String _formatErrorMessage(Object error) {
+    final message = error.toString();
+    if (message.startsWith('Exception: ')) {
+      return message.substring('Exception: '.length);
+    }
+    return message;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final vpnState = ref.watch(vpnStateProvider);
@@ -14,7 +46,7 @@ class DashboardScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('ProxyChain Core', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('代理链核心', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
@@ -55,31 +87,27 @@ class DashboardScreen extends ConsumerWidget {
       case VpnConnectionState.disconnected:
         buttonColor = Colors.redAccent;
         buttonIcon = Icons.power_settings_new;
-        buttonText = 'TAP TO CONNECT';
+        buttonText = '点击连接';
         break;
       case VpnConnectionState.connecting:
         buttonColor = Colors.orangeAccent;
         buttonIcon = Icons.autorenew;
-        buttonText = 'CONNECTING...';
+        buttonText = '连接中...';
         break;
       case VpnConnectionState.connected:
         buttonColor = Colors.green;
         buttonIcon = Icons.vpn_lock;
-        buttonText = 'CONNECTED';
+        buttonText = '已连接';
         break;
     }
 
     return GestureDetector(
       onTap: () async {
-        // 模拟状态切换逻辑
-        if (state == VpnConnectionState.disconnected) {
-          ref.read(vpnStateProvider.notifier).state = VpnConnectionState.connecting;
-          // 模拟连接耗时
-          await Future.delayed(const Duration(seconds: 2));
-          ref.read(vpnStateProvider.notifier).state = VpnConnectionState.connected;
-        } else if (state == VpnConnectionState.connected) {
-          ref.read(vpnStateProvider.notifier).state = VpnConnectionState.disconnected;
+        if (state == VpnConnectionState.connecting) {
+          return;
         }
+
+        await _handleMainButtonTap(context, ref, state);
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
@@ -117,7 +145,7 @@ class DashboardScreen extends ConsumerWidget {
 
   Widget _buildProxyChainDisplay(activeChain) {
     if (activeChain == null) {
-      return const Text('No proxy chain selected', style: TextStyle(color: Colors.grey));
+      return const Text('未选择代理节点', style: TextStyle(color: Colors.grey));
     }
 
     return Container(
@@ -140,7 +168,7 @@ class DashboardScreen extends ConsumerWidget {
           Expanded(
             child: Column(
               children: [
-                const Text('Entry Node', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text('入口节点', style: TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 4),
                 Text(
                   activeChain.entryNode.name,
@@ -162,7 +190,7 @@ class DashboardScreen extends ConsumerWidget {
           Expanded(
             child: Column(
               children: [
-                const Text('Exit Node', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text('固定出口节点', style: TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 4),
                 Text(
                   activeChain.exitNode.name,
