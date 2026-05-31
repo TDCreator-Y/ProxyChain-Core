@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use crate::api::proxy::{ProxyNode, ProxyProtocol};
 use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
@@ -24,23 +25,31 @@ struct ClashProxy {
     cipher: Option<String>,
 }
 
-#[flutter_rust_bridge::frb(sync)]
-pub fn fetch_subscription(url: String) -> Result<Vec<ProxyNode>, String> {
-    let response =
-        reqwest::blocking::get(&url).map_err(|err| format!("failed to fetch subscription: {err}"))?;
+pub async fn fetch_subscription(url: String) -> Result<Vec<ProxyNode>> {
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|err| anyhow!("failed to fetch subscription: {err}"))?;
+        
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("subscription request failed with status {status}"));
+        return Err(anyhow!("subscription request failed with status {status}"));
     }
 
     let text = response
         .text()
-        .map_err(|err| format!("failed to read subscription response body: {err}"))?;
+        .await
+        .map_err(|err| anyhow!("failed to read subscription response body: {err}"))?;
 
-    parse_subscription_text(&text)
+    let nodes = parse_subscription_text(&text)?;
+    
+    if nodes.is_empty() {
+        return Err(anyhow!("No valid proxy nodes found in the subscription"));
+    }
+    
+    Ok(nodes)
 }
 
-fn parse_subscription_text(text: &str) -> Result<Vec<ProxyNode>, String> {
+fn parse_subscription_text(text: &str) -> Result<Vec<ProxyNode>> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -58,9 +67,9 @@ fn looks_like_clash_yaml(text: &str) -> bool {
         .any(|line| line.trim_start().starts_with("proxies:"))
 }
 
-fn parse_clash_yaml(text: &str) -> Result<Vec<ProxyNode>, String> {
+fn parse_clash_yaml(text: &str) -> Result<Vec<ProxyNode>> {
     let config: ClashConfig =
-        serde_yaml::from_str(text).map_err(|err| format!("failed to parse clash yaml: {err}"))?;
+        serde_yaml::from_str(text).map_err(|err| anyhow!("failed to parse clash yaml: {err}"))?;
 
     let nodes = config
         .proxies
@@ -91,7 +100,7 @@ fn parse_clash_yaml(text: &str) -> Result<Vec<ProxyNode>, String> {
     Ok(nodes)
 }
 
-fn parse_base64_sub(text: &str) -> Result<Vec<ProxyNode>, String> {
+fn parse_base64_sub(text: &str) -> Result<Vec<ProxyNode>> {
     let decoded = decode_subscription_blob(text);
     let decoded_text = String::from_utf8_lossy(&decoded);
     let source_text = decoded_text.trim();

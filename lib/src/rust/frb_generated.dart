@@ -80,7 +80,9 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 abstract class RustLibApi extends BaseApi {
   ProxyChain crateApiProxyCreateMockChain();
 
-  List<ProxyNode> crateApiSubscriptionFetchSubscription({required String url});
+  Future<List<ProxyNode>> crateApiSubscriptionFetchSubscription({
+    required String url,
+  });
 
   String crateApiSimpleGreet({required String name});
 
@@ -123,17 +125,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "create_mock_chain", argNames: []);
 
   @override
-  List<ProxyNode> crateApiSubscriptionFetchSubscription({required String url}) {
-    return handler.executeSync(
-      SyncTask(
-        callFfi: () {
+  Future<List<ProxyNode>> crateApiSubscriptionFetchSubscription({
+    required String url,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(url, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 2)!;
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_list_proxy_node,
-          decodeErrorData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiSubscriptionFetchSubscriptionConstMeta,
         argValues: [url],

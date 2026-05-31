@@ -54,7 +54,7 @@ final subscriptionUrlProvider = StateProvider<String>((ref) {
 });
 
 // --- 阶段四 4.2 新增：Mock 节点池 ---
-final entryPoolProvider = Provider<List<ProxyNode>>((ref) {
+final entryPoolProvider = StateProvider<List<ProxyNode>>((ref) {
   return [
     const ProxyNode(id: 'entry_1', name: '香港 01', protocol: ProxyProtocol.socks5, server: 'hk1.example.com', port: 1080, password: 'pwd', cipher: null),
     const ProxyNode(id: 'entry_2', name: '日本 01', protocol: ProxyProtocol.shadowsocks, server: 'jp1.example.com', port: 8388, password: 'pwd', cipher: 'aes-256-gcm'),

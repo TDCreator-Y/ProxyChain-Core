@@ -76,15 +76,16 @@ fn wire__crate__api__proxy__create_mock_chain_impl(
     )
 }
 fn wire__crate__api__subscription__fetch_subscription_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
-) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
             debug_name: "fetch_subscription",
-            port: None,
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
         move || {
             let message = unsafe {
@@ -98,10 +99,16 @@ fn wire__crate__api__subscription__fetch_subscription_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_url = <String>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, String>((move || {
-                let output_ok = crate::api::subscription::fetch_subscription(api_url)?;
-                Ok(output_ok)
-            })())
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::subscription::fetch_subscription(api_url).await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
         },
     )
 }
@@ -378,6 +385,12 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
+        2 => wire__crate__api__subscription__fetch_subscription_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
         4 => wire__crate__api__proxy__start_engine_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
@@ -392,7 +405,6 @@ fn pde_ffi_dispatcher_sync_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         1 => wire__crate__api__proxy__create_mock_chain_impl(ptr, rust_vec_len, data_len),
-        2 => wire__crate__api__subscription__fetch_subscription_impl(ptr, rust_vec_len, data_len),
         3 => wire__crate__api__simple__greet_impl(ptr, rust_vec_len, data_len),
         5 => wire__crate__api__proxy__stop_engine_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),

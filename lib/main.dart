@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_app/src/rust/frb_generated.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/chain_builder_screen.dart';
+import 'screens/settings_screen.dart';
 import 'services/config_manager.dart';
 import 'providers/vpn_state_provider.dart';
 
@@ -50,10 +51,11 @@ class MainLayout extends StatefulWidget {
 class _MainLayoutState extends State<MainLayout> {
   int _currentIndex = 0;
   
-  // 管理底部的两个屏幕
+  // 管理底部的三个屏幕
   final _screens = const [
     DashboardScreen(),
     ChainBuilderScreen(),
+    SettingsScreen(),
   ];
 
   @override
@@ -80,6 +82,10 @@ class _MainLayoutState extends State<MainLayout> {
           BottomNavigationBarItem(
             icon: Icon(Icons.link),
             label: '代理链构建',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: '设置/订阅',
           ),
         ],
       ),
