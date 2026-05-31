@@ -1,8 +1,15 @@
 use crate::frb_generated::StreamSink;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use shadowsocks::{
+    config::{ServerAddr as SsServerAddr, ServerConfig as SsServerConfig, ServerType as SsServerType},
+    context::Context as SsContext,
+    crypto::CipherKind,
+    relay::{socks5::Address as SsAddress, tcprelay::proxy_stream::client::ProxyClientStream},
+};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -42,6 +49,12 @@ pub enum TrafficMsg {
     Up(u64),
     Down(u64),
 }
+
+trait ProxyIoStream: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> ProxyIoStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+type BoxProxyStream = Box<dyn ProxyIoStream>;
 
 static TOKIO_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 static ENGINE_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -91,8 +104,8 @@ pub fn start_engine(
 
     validate_proxy_node(&chain.entry_node)?;
     validate_proxy_node(&chain.exit_node)?;
-    validate_proxy_protocol(&chain.entry_node)?;
-    validate_proxy_protocol(&chain.exit_node)?;
+    validate_entry_protocol(&chain.entry_node)?;
+    validate_exit_protocol(&chain.exit_node)?;
 
     let runtime = TOKIO_RUNTIME
         .get_or_init(|| Runtime::new().expect("failed to create tokio runtime for local proxy"));
@@ -185,7 +198,7 @@ async fn handle_inbound_client_with_metrics(
     let nested_stream = connect_via_chain(&chain, &requested_target).await?;
 
     let (mut ri, mut wi) = inbound.into_split();
-    let (mut ro, mut wo) = nested_stream.into_split();
+    let (mut ro, mut wo) = tokio::io::split(nested_stream);
 
     let tx_up = tx.clone();
     let tx_down = tx.clone();
@@ -226,27 +239,42 @@ async fn handle_inbound_client_with_metrics(
 pub(crate) async fn connect_via_chain(
     chain: &ProxyChain,
     requested_target: &TargetAddr,
-) -> Result<TcpStream, String> {
-    let mut entry_stream = connect_to_proxy_node(&chain.entry_node).await?;
+) -> Result<BoxProxyStream, String> {
+    let exit_target = TargetAddr::Domain(chain.exit_node.server.clone(), chain.exit_node.port);
+    let mut entry_stream = connect_to_proxy_node(&chain.entry_node, &exit_target).await?;
 
-    socks5_connect(
-        &mut entry_stream,
-        &TargetAddr::Domain(chain.exit_node.server.clone(), chain.exit_node.port),
-    )
-    .await?;
+    if matches!(chain.entry_node.protocol, ProxyProtocol::Socks5) {
+        socks5_connect(&mut entry_stream, &exit_target).await?;
+    }
 
+    // The exit node is still a SOCKS5 hop. After the entry hop reaches it,
+    // perform a second SOCKS5 handshake before requesting the final target.
+    socks5_handshake(&mut entry_stream).await?;
     socks5_connect(&mut entry_stream, requested_target).await?;
     Ok(entry_stream)
 }
 
-async fn connect_to_proxy_node(node: &ProxyNode) -> Result<TcpStream, String> {
+async fn connect_to_proxy_node(
+    node: &ProxyNode,
+    target: &TargetAddr,
+) -> Result<BoxProxyStream, String> {
     let addr = format!("{}:{}", node.server, node.port);
-    let mut stream = TcpStream::connect(&addr)
+    let stream = TcpStream::connect(&addr)
         .await
         .map_err(|err| format!("failed to connect to proxy node {} ({}): {err}", node.name, addr))?;
 
-    socks5_handshake(&mut stream).await?;
-    Ok(stream)
+    match node.protocol {
+        ProxyProtocol::Socks5 => {
+            let mut stream = stream;
+            socks5_handshake(&mut stream).await?;
+            Ok(Box::new(stream))
+        }
+        ProxyProtocol::Shadowsocks => connect_to_shadowsocks_node(stream, node, target),
+        unsupported => Err(format!(
+            "protocol {:?} is not implemented yet for entry nodes",
+            unsupported
+        )),
+    }
 }
 
 fn validate_proxy_node(node: &ProxyNode) -> Result<(), String> {
@@ -259,11 +287,33 @@ fn validate_proxy_node(node: &ProxyNode) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_proxy_protocol(node: &ProxyNode) -> Result<(), String> {
+fn validate_entry_protocol(node: &ProxyNode) -> Result<(), String> {
+    match node.protocol {
+        ProxyProtocol::Socks5 => Ok(()),
+        ProxyProtocol::Shadowsocks => {
+            let cipher = node
+                .cipher
+                .as_deref()
+                .ok_or_else(|| format!("shadowsocks node {} is missing cipher", node.name))?;
+            CipherKind::from_str(cipher)
+                .map_err(|err| format!("invalid shadowsocks cipher for {}: {err}", node.name))?;
+            if node.password.is_empty() {
+                return Err(format!("shadowsocks node {} is missing password", node.name));
+            }
+            Ok(())
+        }
+        _ => Err(format!(
+            "protocol {:?} is not implemented yet for entry nodes; only Socks5 and Shadowsocks are supported",
+            node.protocol
+        )),
+    }
+}
+
+fn validate_exit_protocol(node: &ProxyNode) -> Result<(), String> {
     match node.protocol {
         ProxyProtocol::Socks5 => Ok(()),
         _ => Err(format!(
-            "protocol {:?} is not implemented yet; only Socks5 is supported as a test stub",
+            "protocol {:?} is not implemented yet for exit nodes; current chain expects a Socks5 exit",
             node.protocol
         )),
     }
@@ -319,7 +369,10 @@ async fn socks5_accept_client(stream: &mut TcpStream) -> Result<TargetAddr, Stri
     Ok(request.target)
 }
 
-async fn socks5_handshake(stream: &mut TcpStream) -> Result<(), String> {
+async fn socks5_handshake<S>(stream: &mut S) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
     stream
         .write_all(&[0x05, 0x01, 0x00])
         .await
@@ -344,7 +397,10 @@ async fn socks5_handshake(stream: &mut TcpStream) -> Result<(), String> {
     Ok(())
 }
 
-async fn socks5_connect(stream: &mut TcpStream, target: &TargetAddr) -> Result<(), String> {
+async fn socks5_connect<S>(stream: &mut S, target: &TargetAddr) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
     let mut request = vec![0x05, 0x01, 0x00];
     match target {
         TargetAddr::Ip(SocketAddr::V4(addr)) => {
@@ -389,7 +445,10 @@ struct Socks5Frame {
     target: TargetAddr,
 }
 
-async fn read_socks5_frame(stream: &mut TcpStream) -> Result<Socks5Frame, String> {
+async fn read_socks5_frame<S>(stream: &mut S) -> Result<Socks5Frame, String>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
     let version = stream
         .read_u8()
         .await
@@ -458,4 +517,31 @@ async fn read_socks5_frame(stream: &mut TcpStream) -> Result<Socks5Frame, String
     };
 
     Ok(Socks5Frame { command, target })
+}
+
+fn connect_to_shadowsocks_node(
+    stream: TcpStream,
+    node: &ProxyNode,
+    target: &TargetAddr,
+) -> Result<BoxProxyStream, String> {
+    let cipher = node
+        .cipher
+        .as_deref()
+        .ok_or_else(|| format!("shadowsocks node {} is missing cipher", node.name))?;
+    let method = CipherKind::from_str(cipher)
+        .map_err(|err| format!("invalid shadowsocks cipher for {}: {err}", node.name))?;
+    let server_addr = SsServerAddr::from_str(&format!("{}:{}", node.server, node.port))
+        .map_err(|err| format!("invalid shadowsocks server address for {}: {err}", node.name))?;
+    let server_config = SsServerConfig::new(server_addr, node.password.clone(), method);
+    let context = SsContext::new_shared(SsServerType::Local);
+    let target_addr = to_shadowsocks_address(target);
+    let stream = ProxyClientStream::from_stream(context, stream, &server_config, target_addr);
+    Ok(Box::new(stream))
+}
+
+fn to_shadowsocks_address(target: &TargetAddr) -> SsAddress {
+    match target {
+        TargetAddr::Ip(addr) => SsAddress::SocketAddress(*addr),
+        TargetAddr::Domain(host, port) => SsAddress::DomainNameAddress(host.clone(), *port),
+    }
 }

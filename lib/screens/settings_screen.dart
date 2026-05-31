@@ -108,7 +108,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 hintText: 'https://...',
                 filled: true,
                 fillColor: Colors.white,
-                border: OutlineBinding(
+                border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),

@@ -60,7 +60,7 @@ pub(crate) async fn start_tun(chain: ProxyChain, tx: mpsc::Sender<TrafficMsg>) -
                     };
 
                     let (mut ri, mut wi) = tokio::io::split(tcp);
-                    let (mut ro, mut wo) = nested_stream.into_split();
+                    let (mut ro, mut wo) = tokio::io::split(nested_stream);
 
                     let tx_up = tx_clone.clone();
                     let tx_down = tx_clone.clone();
