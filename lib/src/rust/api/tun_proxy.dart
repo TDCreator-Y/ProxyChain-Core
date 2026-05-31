@@ -9,10 +9,5 @@ import 'proxy.dart';
 
 // These functions are ignored because they are not marked as `pub`: `setup_routes`
 
-Future<void> startTun({
-  required ProxyChain chain,
-  required SenderTrafficMsg tx,
-}) => RustLib.instance.api.crateApiTunProxyStartTun(chain: chain, tx: tx);
-
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Sender < TrafficMsg >>>
 abstract class SenderTrafficMsg implements RustOpaqueInterface {}

@@ -19,8 +19,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _ispNameController = TextEditingController();
   final _ispServerController = TextEditingController();
   final _ispPortController = TextEditingController();
+  final _ispUsernameController = TextEditingController();
   final _ispPasswordController = TextEditingController();
-  
+
   ProxyProtocol _ispProtocol = ProxyProtocol.socks5;
   String _ispCipher = 'aes-256-gcm';
 
@@ -37,6 +38,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _ispNameController.dispose();
     _ispServerController.dispose();
     _ispPortController.dispose();
+    _ispUsernameController.dispose();
     _ispPasswordController.dispose();
     super.dispose();
   }
@@ -45,11 +47,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final name = _ispNameController.text.trim();
     final server = _ispServerController.text.trim();
     final portStr = _ispPortController.text.trim();
+    final username = _ispUsernameController.text.trim();
     final password = _ispPasswordController.text;
 
     if (name.isEmpty || server.isEmpty || portStr.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请填写完整的节点信息'), backgroundColor: Colors.redAccent),
+        const SnackBar(
+          content: Text('请填写完整的节点信息'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
       return;
     }
@@ -57,7 +63,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final port = int.tryParse(portStr);
     if (port == null || port <= 0 || port > 65535) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('端口号无效'), backgroundColor: Colors.redAccent),
+        const SnackBar(
+          content: Text('端口号无效'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
       return;
     }
@@ -68,6 +77,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       protocol: _ispProtocol,
       server: server,
       port: port,
+      username: username.isEmpty ? null : username,
       password: password,
       cipher: _ispProtocol == ProxyProtocol.shadowsocks ? _ispCipher : null,
     );
@@ -82,6 +92,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _ispNameController.clear();
     _ispServerController.clear();
     _ispPortController.clear();
+    _ispUsernameController.clear();
     _ispPasswordController.clear();
   }
 
@@ -144,7 +155,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('设置 / 订阅', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '设置 / 订阅',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
@@ -156,7 +170,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           children: [
             const Text(
               '节点订阅',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepPurple),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.deepPurple,
+              ),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -197,14 +215,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       )
                     : const Text(
                         '更新订阅',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
               ),
             ),
             const SizedBox(height: 40),
             const Text(
               '当前状态',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepPurple),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.deepPurple,
+              ),
             ),
             const SizedBox(height: 16),
             Consumer(
@@ -232,7 +258,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           const Text('入口节点总数', style: TextStyle(fontSize: 16)),
                           Text(
                             '${entryPool.length}',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
                           ),
                         ],
                       ),
@@ -240,10 +270,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('固定出口节点总数', style: TextStyle(fontSize: 16)),
+                          const Text(
+                            '固定出口节点总数',
+                            style: TextStyle(fontSize: 16),
+                          ),
                           Text(
                             '${exitPool.length}',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepPurple),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.deepPurple,
+                            ),
                           ),
                         ],
                       ),
@@ -255,7 +292,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             const SizedBox(height: 40),
             const Text(
               '手动添加固定出口节点 (ISP)',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepPurple),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.deepPurple,
+              ),
             ),
             const SizedBox(height: 16),
             Container(
@@ -276,7 +317,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 children: [
                   TextField(
                     controller: _ispNameController,
-                    decoration: const InputDecoration(labelText: '节点名称', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: '节点名称',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -285,7 +329,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         flex: 2,
                         child: TextField(
                           controller: _ispServerController,
-                          decoration: const InputDecoration(labelText: '服务器 IP', border: OutlineInputBorder()),
+                          decoration: const InputDecoration(
+                            labelText: '服务器 IP',
+                            border: OutlineInputBorder(),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -293,7 +340,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         flex: 1,
                         child: TextField(
                           controller: _ispPortController,
-                          decoration: const InputDecoration(labelText: '端口', border: OutlineInputBorder()),
+                          decoration: const InputDecoration(
+                            labelText: '端口',
+                            border: OutlineInputBorder(),
+                          ),
                           keyboardType: TextInputType.number,
                         ),
                       ),
@@ -302,10 +352,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   const SizedBox(height: 12),
                   DropdownButtonFormField<ProxyProtocol>(
                     value: _ispProtocol,
-                    decoration: const InputDecoration(labelText: '协议类型', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: '协议类型',
+                      border: OutlineInputBorder(),
+                    ),
                     items: const [
-                      DropdownMenuItem(value: ProxyProtocol.socks5, child: Text('Socks5')),
-                      DropdownMenuItem(value: ProxyProtocol.shadowsocks, child: Text('Shadowsocks')),
+                      DropdownMenuItem(
+                        value: ProxyProtocol.socks5,
+                        child: Text('Socks5'),
+                      ),
+                      DropdownMenuItem(
+                        value: ProxyProtocol.shadowsocks,
+                        child: Text('Shadowsocks'),
+                      ),
                     ],
                     onChanged: (val) {
                       if (val != null) {
@@ -317,18 +376,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   const SizedBox(height: 12),
                   TextField(
+                    controller: _ispUsernameController,
+                    decoration: const InputDecoration(
+                      labelText: '用户名 (可选)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
                     controller: _ispPasswordController,
-                    decoration: const InputDecoration(labelText: '密码 (可选)', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: '密码 (可选)',
+                      border: OutlineInputBorder(),
+                    ),
                     obscureText: true,
                   ),
                   if (_ispProtocol == ProxyProtocol.shadowsocks) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       value: _ispCipher,
-                      decoration: const InputDecoration(labelText: '加密方式', border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: '加密方式',
+                        border: OutlineInputBorder(),
+                      ),
                       items: const [
-                        DropdownMenuItem(value: 'aes-256-gcm', child: Text('aes-256-gcm')),
-                        DropdownMenuItem(value: 'chacha20-ietf-poly1305', child: Text('chacha20-ietf-poly1305')),
+                        DropdownMenuItem(
+                          value: 'aes-256-gcm',
+                          child: Text('aes-256-gcm'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'chacha20-ietf-poly1305',
+                          child: Text('chacha20-ietf-poly1305'),
+                        ),
                       ],
                       onChanged: (val) {
                         if (val != null) {
@@ -353,7 +432,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                       child: const Text(
                         '保存',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ),

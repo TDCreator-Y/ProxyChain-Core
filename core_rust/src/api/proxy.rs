@@ -30,6 +30,7 @@ pub struct ProxyNode {
     pub protocol: ProxyProtocol,
     pub server: String,
     pub port: u16,
+    pub username: Option<String>,
     pub password: String,
     pub cipher: Option<String>,
 }
@@ -68,6 +69,7 @@ pub fn create_mock_chain() -> ProxyChain {
             protocol: ProxyProtocol::Socks5,
             server: "127.0.0.1".to_string(),
             port: 1081,
+            username: None,
             password: "super_secret_entry".to_string(),
             cipher: None,
         },
@@ -77,6 +79,7 @@ pub fn create_mock_chain() -> ProxyChain {
             protocol: ProxyProtocol::Socks5,
             server: "127.0.0.1".to_string(),
             port: 1082,
+            username: None,
             password: "super_secret_exit".to_string(),
             cipher: Some("test-socks5".to_string()),
         },
@@ -265,7 +268,7 @@ where
 {
     match &node.protocol {
         ProxyProtocol::Socks5 => {
-            socks5_handshake(&mut stream).await?;
+            socks5_handshake(&mut stream, node).await?;
             socks5_connect(&mut stream, target).await?;
             Ok(Box::new(stream))
         }
@@ -381,12 +384,12 @@ async fn socks5_accept_client(stream: &mut TcpStream) -> Result<TargetAddr, Stri
     Ok(request.target)
 }
 
-async fn socks5_handshake<S>(stream: &mut S) -> Result<(), String>
+async fn socks5_handshake<S>(stream: &mut S, node: &ProxyNode) -> Result<(), String>
 where
     S: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
     stream
-        .write_all(&[0x05, 0x01, 0x00])
+        .write_all(&[0x05, 0x02, 0x00, 0x02])
         .await
         .map_err(|err| format!("failed to send upstream socks handshake: {err}"))?;
 
@@ -394,7 +397,7 @@ where
         .read_u8()
         .await
         .map_err(|err| format!("failed to read upstream socks version: {err}"))?;
-    let method = stream
+    let server_method = stream
         .read_u8()
         .await
         .map_err(|err| format!("failed to read upstream auth method: {err}"))?;
@@ -402,11 +405,78 @@ where
     if version != 5 {
         return Err(format!("unsupported upstream socks version: {version}"));
     }
-    if method != 0x00 {
-        return Err(format!("upstream socks auth method {method} is not supported"));
-    }
 
-    Ok(())
+    match server_method {
+        0x00 => Ok(()),
+        0x02 => {
+            let username = node
+                .username
+                .as_deref()
+                .ok_or_else(|| {
+                    format!(
+                        "upstream socks proxy {} requires username/password auth, but username is missing",
+                        node.name
+                    )
+                })?;
+            let password = node.password.as_str();
+
+            if username.len() > u8::MAX as usize {
+                return Err(format!(
+                    "username for upstream socks proxy {} is too long",
+                    node.name
+                ));
+            }
+            if password.len() > u8::MAX as usize {
+                return Err(format!(
+                    "password for upstream socks proxy {} is too long",
+                    node.name
+                ));
+            }
+
+            let mut auth_req = Vec::with_capacity(3 + username.len() + password.len());
+            auth_req.push(0x01);
+            auth_req.push(username.len() as u8);
+            auth_req.extend_from_slice(username.as_bytes());
+            auth_req.push(password.len() as u8);
+            auth_req.extend_from_slice(password.as_bytes());
+
+            stream
+                .write_all(&auth_req)
+                .await
+                .map_err(|err| format!("failed to send upstream socks auth request: {err}"))?;
+
+            let auth_version = stream
+                .read_u8()
+                .await
+                .map_err(|err| format!("failed to read upstream socks auth version: {err}"))?;
+            let auth_status = stream
+                .read_u8()
+                .await
+                .map_err(|err| format!("failed to read upstream socks auth status: {err}"))?;
+
+            if auth_version != 0x01 {
+                return Err(format!(
+                    "invalid upstream socks auth response version: {auth_version}"
+                ));
+            }
+            if auth_status != 0x00 {
+                return Err(format!(
+                    "upstream socks username/password auth failed for {} with status {}",
+                    node.name, auth_status
+                ));
+            }
+
+            Ok(())
+        }
+        0xFF => Err(format!(
+            "upstream socks proxy {} rejected all advertised auth methods",
+            node.name
+        )),
+        other => Err(format!(
+            "upstream socks proxy {} replied with unsupported auth method {}",
+            node.name, other
+        )),
+    }
 }
 
 async fn socks5_connect<S>(stream: &mut S, target: &TargetAddr) -> Result<(), String>

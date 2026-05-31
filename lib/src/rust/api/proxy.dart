@@ -55,6 +55,7 @@ class ProxyNode {
   final ProxyProtocol protocol;
   final String server;
   final int port;
+  final String? username;
   final String password;
   final String? cipher;
 
@@ -64,6 +65,7 @@ class ProxyNode {
     required this.protocol,
     required this.server,
     required this.port,
+    this.username,
     required this.password,
     this.cipher,
   });
@@ -75,6 +77,7 @@ class ProxyNode {
       protocol.hashCode ^
       server.hashCode ^
       port.hashCode ^
+      username.hashCode ^
       password.hashCode ^
       cipher.hashCode;
 
@@ -88,6 +91,7 @@ class ProxyNode {
           protocol == other.protocol &&
           server == other.server &&
           port == other.port &&
+          username == other.username &&
           password == other.password &&
           cipher == other.cipher;
 }

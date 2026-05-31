@@ -17,7 +17,10 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
   @override
   Widget build(BuildContext context) {
     // 监听流量数据流
-    ref.listen<AsyncValue<TrafficData>>(trafficStreamProvider, (previous, next) {
+    ref.listen<AsyncValue<TrafficData>>(trafficStreamProvider, (
+      previous,
+      next,
+    ) {
       if (next.hasValue && next.value != null) {
         setState(() {
           _dataPoints.add(next.value!);
@@ -47,7 +50,7 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
             color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             spreadRadius: 2,
-          )
+          ),
         ],
       ),
       child: Column(
@@ -55,7 +58,11 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
         children: [
           const Text(
             'Real-time Traffic (KB/s)',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+            ),
           ),
           const SizedBox(height: 20),
           Expanded(
@@ -72,7 +79,12 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
                   // 上行曲线 (绿色)
                   LineChartBarData(
                     spots: _dataPoints
-                        .map((e) => FlSpot(e.time.millisecondsSinceEpoch.toDouble(), e.upSpeed))
+                        .map(
+                          (e) => FlSpot(
+                            e.time.millisecondsSinceEpoch.toDouble(),
+                            e.upSpeed,
+                          ),
+                        )
                         .toList(),
                     isCurved: true,
                     color: Colors.green,
@@ -87,7 +99,12 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
                   // 下行曲线 (蓝色)
                   LineChartBarData(
                     spots: _dataPoints
-                        .map((e) => FlSpot(e.time.millisecondsSinceEpoch.toDouble(), e.downSpeed))
+                        .map(
+                          (e) => FlSpot(
+                            e.time.millisecondsSinceEpoch.toDouble(),
+                            e.downSpeed,
+                          ),
+                        )
                         .toList(),
                     isCurved: true,
                     color: Colors.blue,
@@ -111,7 +128,7 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
               const SizedBox(width: 20),
               _buildLegend(Colors.blue, 'Download'),
             ],
-          )
+          ),
         ],
       ),
     );
@@ -120,7 +137,11 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
   Widget _buildLegend(Color color, String label) {
     return Row(
       children: [
-        Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
         const SizedBox(width: 4),
         Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
       ],

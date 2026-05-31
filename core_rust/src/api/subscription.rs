@@ -91,6 +91,7 @@ fn parse_clash_yaml(text: &str) -> Result<Vec<ProxyNode>> {
                 protocol,
                 server: proxy.server,
                 port: proxy.port,
+                username: None,
                 password: proxy.password.or(proxy.uuid).unwrap_or_default(),
                 cipher: proxy.cipher,
             })
@@ -152,6 +153,7 @@ fn parse_trojan_uri(parsed_url: &Url, index: usize) -> Option<ProxyNode> {
         protocol: ProxyProtocol::Trojan,
         server: parsed_url.host_str()?.to_string(),
         port: parsed_url.port().unwrap_or(443),
+        username: None,
         password: parsed_url.username().to_string(),
         cipher: None,
     })
@@ -166,6 +168,7 @@ fn parse_socks5_uri(parsed_url: &Url, index: usize) -> Option<ProxyNode> {
         protocol: ProxyProtocol::Socks5,
         server: parsed_url.host_str()?.to_string(),
         port: parsed_url.port().unwrap_or(1080),
+        username: Some(parsed_url.username().to_string()).filter(|s| !s.is_empty()),
         password: parsed_url.password().unwrap_or_default().to_string(),
         cipher: None,
     })
@@ -196,6 +199,7 @@ fn parse_vmess_uri(encoded: &str, index: usize) -> Option<ProxyNode> {
         protocol: ProxyProtocol::Vmess,
         server,
         port,
+        username: None,
         password: value["id"].as_str().unwrap_or_default().to_string(),
         cipher: value["scy"].as_str().map(str::to_string),
     })
@@ -215,6 +219,7 @@ fn parse_ss_uri(rest: &str, index: usize) -> Option<ProxyNode> {
                 protocol: ProxyProtocol::Shadowsocks,
                 server: host.to_string(),
                 port: parsed_url.port().unwrap_or(8388),
+                username: None,
                 password,
                 cipher: Some(method),
             });
@@ -236,6 +241,7 @@ fn parse_ss_uri(rest: &str, index: usize) -> Option<ProxyNode> {
         protocol: ProxyProtocol::Shadowsocks,
         server: host.to_string(),
         port,
+        username: None,
         password: password.to_string(),
         cipher: Some(method.to_string()),
     })

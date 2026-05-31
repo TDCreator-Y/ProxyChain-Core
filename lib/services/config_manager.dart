@@ -24,6 +24,7 @@ class ConfigManager {
       'protocol': node.protocol.index,
       'server': node.server,
       'port': node.port,
+      'username': node.username,
       'password': node.password,
       'cipher': node.cipher,
     };
@@ -36,6 +37,7 @@ class ConfigManager {
       protocol: ProxyProtocol.values[json['protocol'] as int],
       server: json['server'] as String,
       port: json['port'] as int,
+      username: json['username'] as String?,
       password: json['password'] as String,
       cipher: json['cipher'] as String?,
     );

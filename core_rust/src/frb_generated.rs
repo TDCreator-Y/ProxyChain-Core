@@ -339,6 +339,7 @@ impl SseDecode for crate::api::proxy::ProxyNode {
         let mut var_protocol = <crate::api::proxy::ProxyProtocol>::sse_decode(deserializer);
         let mut var_server = <String>::sse_decode(deserializer);
         let mut var_port = <u16>::sse_decode(deserializer);
+        let mut var_username = <Option<String>>::sse_decode(deserializer);
         let mut var_password = <String>::sse_decode(deserializer);
         let mut var_cipher = <Option<String>>::sse_decode(deserializer);
         return crate::api::proxy::ProxyNode {
@@ -347,6 +348,7 @@ impl SseDecode for crate::api::proxy::ProxyNode {
             protocol: var_protocol,
             server: var_server,
             port: var_port,
+            username: var_username,
             password: var_password,
             cipher: var_cipher,
         };
@@ -612,6 +614,7 @@ impl SseEncode for crate::api::proxy::ProxyNode {
         <crate::api::proxy::ProxyProtocol>::sse_encode(self.protocol, serializer);
         <String>::sse_encode(self.server, serializer);
         <u16>::sse_encode(self.port, serializer);
+        <Option<String>>::sse_encode(self.username, serializer);
         <String>::sse_encode(self.password, serializer);
         <Option<String>>::sse_encode(self.cipher, serializer);
     }

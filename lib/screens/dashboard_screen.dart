@@ -46,7 +46,10 @@ class DashboardScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('代理链核心', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '代理链核心',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
@@ -59,18 +62,16 @@ class DashboardScreen extends ConsumerWidget {
               const SizedBox(height: 20),
               // 1. 巨大的圆形操作按钮
               _buildMainButton(context, ref, vpnState),
-              
+
               const SizedBox(height: 40),
-              
+
               // 2. 当前选中的代理链显示
               _buildProxyChainDisplay(activeChain),
-              
+
               const SizedBox(height: 40),
-              
+
               // 3. 流量折线图组件
-              const Expanded(
-                child: TrafficChart(),
-              ),
+              const Expanded(child: TrafficChart()),
             ],
           ),
         ),
@@ -78,7 +79,11 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildMainButton(BuildContext context, WidgetRef ref, VpnConnectionState state) {
+  Widget _buildMainButton(
+    BuildContext context,
+    WidgetRef ref,
+    VpnConnectionState state,
+  ) {
     Color buttonColor;
     IconData buttonIcon;
     String buttonText;
@@ -121,7 +126,7 @@ class DashboardScreen extends ConsumerWidget {
               color: buttonColor.withOpacity(0.4),
               blurRadius: 20,
               spreadRadius: 10,
-            )
+            ),
           ],
         ),
         child: Column(
@@ -158,7 +163,7 @@ class DashboardScreen extends ConsumerWidget {
             color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             spreadRadius: 1,
-          )
+          ),
         ],
       ),
       child: Row(
@@ -168,33 +173,45 @@ class DashboardScreen extends ConsumerWidget {
           Expanded(
             child: Column(
               children: [
-                const Text('入口节点', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text(
+                  '入口节点',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
                 const SizedBox(height: 4),
                 Text(
                   activeChain.entryNode.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                   textAlign: TextAlign.center,
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
-          
+
           // 箭头
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 10),
             child: Icon(Icons.arrow_forward_rounded, color: Colors.deepPurple),
           ),
-          
+
           // 出口节点
           Expanded(
             child: Column(
               children: [
-                const Text('固定出口节点', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text(
+                  '固定出口节点',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
                 const SizedBox(height: 4),
                 Text(
                   activeChain.exitNode.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                   textAlign: TextAlign.center,
                   overflow: TextOverflow.ellipsis,
                 ),

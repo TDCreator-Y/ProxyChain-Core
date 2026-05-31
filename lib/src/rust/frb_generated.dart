@@ -226,22 +226,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required ProxyNode entry,
     required ProxyNode exit,
   }) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_box_autoadd_proxy_node(entry, serializer);
-        sse_encode_box_autoadd_proxy_node(exit, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 6, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_i_32,
-        decodeErrorData: sse_decode_String,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_proxy_node(entry, serializer);
+          sse_encode_box_autoadd_proxy_node(exit, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_i_32,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiProxyTestChainLatencyConstMeta,
+        argValues: [entry, exit],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiProxyTestChainLatencyConstMeta,
-      argValues: [entry, exit],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiProxyTestChainLatencyConstMeta =>
@@ -338,16 +344,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ProxyNode dco_decode_proxy_node(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return ProxyNode(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
       protocol: dco_decode_proxy_protocol(arr[2]),
       server: dco_decode_String(arr[3]),
       port: dco_decode_u_16(arr[4]),
-      password: dco_decode_String(arr[5]),
-      cipher: dco_decode_opt_String(arr[6]),
+      username: dco_decode_opt_String(arr[5]),
+      password: dco_decode_String(arr[6]),
+      cipher: dco_decode_opt_String(arr[7]),
     );
   }
 
@@ -473,6 +480,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_protocol = sse_decode_proxy_protocol(deserializer);
     var var_server = sse_decode_String(deserializer);
     var var_port = sse_decode_u_16(deserializer);
+    var var_username = sse_decode_opt_String(deserializer);
     var var_password = sse_decode_String(deserializer);
     var var_cipher = sse_decode_opt_String(deserializer);
     return ProxyNode(
@@ -481,6 +489,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       protocol: var_protocol,
       server: var_server,
       port: var_port,
+      username: var_username,
       password: var_password,
       cipher: var_cipher,
     );
@@ -624,6 +633,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_proxy_protocol(self.protocol, serializer);
     sse_encode_String(self.server, serializer);
     sse_encode_u_16(self.port, serializer);
+    sse_encode_opt_String(self.username, serializer);
     sse_encode_String(self.password, serializer);
     sse_encode_opt_String(self.cipher, serializer);
   }
