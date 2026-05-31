@@ -8,8 +8,16 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 flutter_rust_bridge = "=2.12.0"
+ipstack = "1.0.0"
 serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.43", features = ["io-util", "macros", "net", "rt-multi-thread", "sync"] }
+tokio = { version = "1.43", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tun = { version = "0.8.10", features = ["async"] }
+reqwest = { version = "0.12.4", features = ["blocking", "json"] }
+base64 = "0.22.1"
+serde_yaml = "0.9.34"
+serde_json = "1.0"
+url = "2.5.0"
+urlencoding = "2.1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

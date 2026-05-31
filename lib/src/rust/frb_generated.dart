@@ -5,6 +5,7 @@
 
 import 'api/proxy.dart';
 import 'api/simple.dart';
+import 'api/subscription.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -65,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -1180189885;
+  int get rustContentHash => -1416359543;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -79,12 +80,16 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 abstract class RustLibApi extends BaseApi {
   ProxyChain crateApiProxyCreateMockChain();
 
+  List<ProxyNode> crateApiSubscriptionFetchSubscription({required String url});
+
   String crateApiSimpleGreet({required String name});
 
-  void crateApiProxyStartLocalProxy({
-    required ProxyChain chain,
-    required int localPort,
+  Stream<TrafficStatus> crateApiProxyStartEngine({
+    required ProxyNode entryNode,
+    required ProxyNode exitNode,
   });
+
+  void crateApiProxyStopEngine();
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -118,13 +123,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "create_mock_chain", argNames: []);
 
   @override
+  List<ProxyNode> crateApiSubscriptionFetchSubscription({required String url}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(url, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 2)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_proxy_node,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSubscriptionFetchSubscriptionConstMeta,
+        argValues: [url],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSubscriptionFetchSubscriptionConstMeta =>
+      const TaskConstMeta(debugName: "fetch_subscription", argNames: ["url"]);
+
+  @override
   String crateApiSimpleGreet({required String name}) {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(name, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 2)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 3)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -141,34 +169,79 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "greet", argNames: ["name"]);
 
   @override
-  void crateApiProxyStartLocalProxy({
-    required ProxyChain chain,
-    required int localPort,
+  Stream<TrafficStatus> crateApiProxyStartEngine({
+    required ProxyNode entryNode,
+    required ProxyNode exitNode,
   }) {
+    final sink = RustStreamSink<TrafficStatus>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_box_autoadd_proxy_node(entryNode, serializer);
+            sse_encode_box_autoadd_proxy_node(exitNode, serializer);
+            sse_encode_StreamSink_traffic_status_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 4,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_unit,
+            decodeErrorData: sse_decode_String,
+          ),
+          constMeta: kCrateApiProxyStartEngineConstMeta,
+          argValues: [entryNode, exitNode, sink],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiProxyStartEngineConstMeta => const TaskConstMeta(
+    debugName: "start_engine",
+    argNames: ["entryNode", "exitNode", "sink"],
+  );
+
+  @override
+  void crateApiProxyStopEngine() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_box_autoadd_proxy_chain(chain, serializer);
-          sse_encode_u_16(localPort, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 3)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
-          decodeErrorData: sse_decode_String,
+          decodeErrorData: null,
         ),
-        constMeta: kCrateApiProxyStartLocalProxyConstMeta,
-        argValues: [chain, localPort],
+        constMeta: kCrateApiProxyStopEngineConstMeta,
+        argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiProxyStartLocalProxyConstMeta =>
-      const TaskConstMeta(
-        debugName: "start_local_proxy",
-        argNames: ["chain", "localPort"],
-      );
+  TaskConstMeta get kCrateApiProxyStopEngineConstMeta =>
+      const TaskConstMeta(debugName: "stop_engine", argNames: []);
+
+  @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return AnyhowException(raw as String);
+  }
+
+  @protected
+  RustStreamSink<TrafficStatus> dco_decode_StreamSink_traffic_status_Sse(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    throw UnimplementedError();
+  }
 
   @protected
   String dco_decode_String(dynamic raw) {
@@ -177,9 +250,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  ProxyChain dco_decode_box_autoadd_proxy_chain(dynamic raw) {
+  ProxyNode dco_decode_box_autoadd_proxy_node(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_proxy_chain(raw);
+    return dco_decode_proxy_node(raw);
   }
 
   @protected
@@ -192,6 +265,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
+  }
+
+  @protected
+  List<ProxyNode> dco_decode_list_proxy_node(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_proxy_node).toList();
   }
 
   @protected
@@ -236,9 +315,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  TrafficStatus dco_decode_traffic_status(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return TrafficStatus(
+      up: dco_decode_u_64(arr[0]),
+      down: dco_decode_u_64(arr[1]),
+    );
+  }
+
+  @protected
   int dco_decode_u_16(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeU64(raw);
   }
 
   @protected
@@ -254,6 +351,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_String(deserializer);
+    return AnyhowException(inner);
+  }
+
+  @protected
+  RustStreamSink<TrafficStatus> sse_decode_StreamSink_traffic_status_Sse(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    throw UnimplementedError('Unreachable ()');
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
@@ -261,9 +373,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  ProxyChain sse_decode_box_autoadd_proxy_chain(SseDeserializer deserializer) {
+  ProxyNode sse_decode_box_autoadd_proxy_node(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_proxy_chain(deserializer));
+    return (sse_decode_proxy_node(deserializer));
   }
 
   @protected
@@ -277,6 +389,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
+  List<ProxyNode> sse_decode_list_proxy_node(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <ProxyNode>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_proxy_node(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -327,9 +451,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  TrafficStatus sse_decode_traffic_status(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_up = sse_decode_u_64(deserializer);
+    var var_down = sse_decode_u_64(deserializer);
+    return TrafficStatus(up: var_up, down: var_down);
+  }
+
+  @protected
   int sse_decode_u_16(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint16();
+  }
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getBigUint64();
   }
 
   @protected
@@ -350,18 +488,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_AnyhowException(
+    AnyhowException self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_StreamSink_traffic_status_Sse(
+    RustStreamSink<TrafficStatus> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(
+      self.setupAndSerialize(
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_traffic_status,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+      ),
+      serializer,
+    );
+  }
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
   }
 
   @protected
-  void sse_encode_box_autoadd_proxy_chain(
-    ProxyChain self,
+  void sse_encode_box_autoadd_proxy_node(
+    ProxyNode self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_proxy_chain(self, serializer);
+    sse_encode_proxy_node(self, serializer);
   }
 
   @protected
@@ -378,6 +542,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
+  }
+
+  @protected
+  void sse_encode_list_proxy_node(
+    List<ProxyNode> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_proxy_node(item, serializer);
+    }
   }
 
   @protected
@@ -416,9 +592,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_traffic_status(TrafficStatus self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self.up, serializer);
+    sse_encode_u_64(self.down, serializer);
+  }
+
+  @protected
   void sse_encode_u_16(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint16(self);
+  }
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putBigUint64(self);
   }
 
   @protected

@@ -1,9 +1,12 @@
+use crate::frb_generated::StreamSink;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::OnceLock;
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use std::sync::{Mutex, OnceLock};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProxyProtocol {
@@ -30,7 +33,18 @@ pub struct ProxyChain {
     pub exit_node: ProxyNode,
 }
 
+pub struct TrafficStatus {
+    pub up: u64,
+    pub down: u64,
+}
+
+pub enum TrafficMsg {
+    Up(u64),
+    Down(u64),
+}
+
 static TOKIO_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+static ENGINE_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 #[flutter_rust_bridge::frb(sync)]
 pub fn create_mock_chain() -> ProxyChain {
@@ -57,7 +71,24 @@ pub fn create_mock_chain() -> ProxyChain {
 }
 
 #[flutter_rust_bridge::frb(sync)]
-pub fn start_local_proxy(chain: ProxyChain, local_port: u16) -> Result<(), String> {
+pub fn stop_engine() {
+    if let Some(handle) = ENGINE_TASK.lock().unwrap().take() {
+        handle.abort();
+    }
+}
+
+pub fn start_engine(
+    entry_node: ProxyNode,
+    exit_node: ProxyNode,
+    sink: StreamSink<TrafficStatus>,
+) -> Result<(), String> {
+    stop_engine();
+
+    let chain = ProxyChain {
+        entry_node,
+        exit_node,
+    };
+
     validate_proxy_node(&chain.entry_node)?;
     validate_proxy_node(&chain.exit_node)?;
     validate_proxy_protocol(&chain.entry_node)?;
@@ -66,14 +97,53 @@ pub fn start_local_proxy(chain: ProxyChain, local_port: u16) -> Result<(), Strin
     let runtime = TOKIO_RUNTIME
         .get_or_init(|| Runtime::new().expect("failed to create tokio runtime for local proxy"));
 
-    let listener =
-        runtime.block_on(bind_local_listener(local_port))?;
+    let listener = runtime.block_on(bind_local_listener(1080))?;
 
-    runtime.spawn(async move {
-        if let Err(err) = run_local_proxy(listener, chain).await {
-            eprintln!("local proxy stopped: {err}");
+    let (tx, mut rx) = mpsc::channel::<TrafficMsg>(10000);
+
+    let handle = runtime.spawn(async move {
+        let proxy_fut = run_local_proxy_with_metrics(listener, chain.clone(), tx.clone());
+        let tun_fut = crate::api::tun_proxy::start_tun(chain, tx);
+        
+        let traffic_fut = async move {
+            let mut current_up = 0;
+            let mut current_down = 0;
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let _ = sink.add(TrafficStatus { up: current_up, down: current_down });
+                        current_up = 0;
+                        current_down = 0;
+                    }
+                    msg = rx.recv() => {
+                        match msg {
+                            Some(TrafficMsg::Up(bytes)) => current_up += bytes,
+                            Some(TrafficMsg::Down(bytes)) => current_down += bytes,
+                            None => break,
+                        }
+                    }
+                }
+            }
+        };
+
+        tokio::select! {
+            res = proxy_fut => {
+                if let Err(err) = res {
+                    eprintln!("local proxy stopped: {err}");
+                }
+            }
+            res = tun_fut => {
+                if let Err(err) = res {
+                    eprintln!("tun proxy stopped: {err}");
+                }
+            }
+            _ = traffic_fut => {}
         }
     });
+
+    *ENGINE_TASK.lock().unwrap() = Some(handle);
 
     Ok(())
 }
@@ -85,34 +155,75 @@ async fn bind_local_listener(local_port: u16) -> Result<TcpListener, String> {
         .map_err(|err| format!("failed to bind local listener on {listen_addr}: {err}"))
 }
 
-async fn run_local_proxy(listener: TcpListener, chain: ProxyChain) -> Result<(), String> {
+async fn run_local_proxy_with_metrics(
+    listener: TcpListener,
+    chain: ProxyChain,
+    tx: mpsc::Sender<TrafficMsg>,
+) -> Result<(), String> {
     loop {
         let (inbound, _) = listener
             .accept()
             .await
             .map_err(|err| format!("failed to accept inbound client: {err}"))?;
         let chain = chain.clone();
+        let tx = tx.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = handle_inbound_client(inbound, chain).await {
+            if let Err(err) = handle_inbound_client_with_metrics(inbound, chain, tx).await {
                 eprintln!("proxy session failed: {err}");
             }
         });
     }
 }
 
-async fn handle_inbound_client(mut inbound: TcpStream, chain: ProxyChain) -> Result<(), String> {
+async fn handle_inbound_client_with_metrics(
+    mut inbound: TcpStream,
+    chain: ProxyChain,
+    tx: mpsc::Sender<TrafficMsg>,
+) -> Result<(), String> {
     let requested_target = socks5_accept_client(&mut inbound).await?;
-    let mut nested_stream = connect_via_chain(&chain, &requested_target).await?;
+    let nested_stream = connect_via_chain(&chain, &requested_target).await?;
 
-    io::copy_bidirectional(&mut inbound, &mut nested_stream)
-        .await
-        .map_err(|err| format!("bidirectional copy failed: {err}"))?;
+    let (mut ri, mut wi) = inbound.into_split();
+    let (mut ro, mut wo) = nested_stream.into_split();
+
+    let tx_up = tx.clone();
+    let tx_down = tx.clone();
+
+    let client_to_server = tokio::spawn(async move {
+        let mut buf = vec![0u8; 8192];
+        loop {
+            let n = ri.read(&mut buf).await.unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            if wo.write_all(&buf[..n]).await.is_err() {
+                break;
+            }
+            let _ = tx_up.send(TrafficMsg::Up(n as u64)).await;
+        }
+    });
+
+    let server_to_client = tokio::spawn(async move {
+        let mut buf = vec![0u8; 8192];
+        loop {
+            let n = ro.read(&mut buf).await.unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            if wi.write_all(&buf[..n]).await.is_err() {
+                break;
+            }
+            let _ = tx_down.send(TrafficMsg::Down(n as u64)).await;
+        }
+    });
+
+    let _ = tokio::try_join!(client_to_server, server_to_client);
 
     Ok(())
 }
 
-async fn connect_via_chain(
+pub(crate) async fn connect_via_chain(
     chain: &ProxyChain,
     requested_target: &TargetAddr,
 ) -> Result<TcpStream, String> {
@@ -159,7 +270,7 @@ fn validate_proxy_protocol(node: &ProxyNode) -> Result<(), String> {
 }
 
 #[derive(Debug, Clone)]
-enum TargetAddr {
+pub(crate) enum TargetAddr {
     Ip(SocketAddr),
     Domain(String, u16),
 }

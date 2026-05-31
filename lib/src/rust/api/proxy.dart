@@ -6,18 +6,22 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bind_local_listener`, `connect_to_proxy_node`, `connect_via_chain`, `handle_inbound_client`, `read_socks5_frame`, `run_local_proxy`, `socks5_accept_client`, `socks5_connect`, `socks5_handshake`, `validate_proxy_node`, `validate_proxy_protocol`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Socks5Frame`, `TargetAddr`
+// These functions are ignored because they are not marked as `pub`: `bind_local_listener`, `connect_to_proxy_node`, `connect_via_chain`, `handle_inbound_client_with_metrics`, `read_socks5_frame`, `run_local_proxy_with_metrics`, `socks5_accept_client`, `socks5_connect`, `socks5_handshake`, `validate_proxy_node`, `validate_proxy_protocol`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Socks5Frame`, `TargetAddr`, `TrafficMsg`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`
 
 ProxyChain createMockChain() =>
     RustLib.instance.api.crateApiProxyCreateMockChain();
 
-void startLocalProxy({required ProxyChain chain, required int localPort}) =>
-    RustLib.instance.api.crateApiProxyStartLocalProxy(
-      chain: chain,
-      localPort: localPort,
-    );
+void stopEngine() => RustLib.instance.api.crateApiProxyStopEngine();
+
+Stream<TrafficStatus> startEngine({
+  required ProxyNode entryNode,
+  required ProxyNode exitNode,
+}) => RustLib.instance.api.crateApiProxyStartEngine(
+  entryNode: entryNode,
+  exitNode: exitNode,
+);
 
 class ProxyChain {
   final ProxyNode entryNode;
@@ -81,3 +85,21 @@ class ProxyNode {
 }
 
 enum ProxyProtocol { shadowsocks, trojan, socks5, vmess }
+
+class TrafficStatus {
+  final BigInt up;
+  final BigInt down;
+
+  const TrafficStatus({required this.up, required this.down});
+
+  @override
+  int get hashCode => up.hashCode ^ down.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TrafficStatus &&
+          runtimeType == other.runtimeType &&
+          up == other.up &&
+          down == other.down;
+}

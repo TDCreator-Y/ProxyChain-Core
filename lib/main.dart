@@ -1,11 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_rust_app/src/rust/api/proxy.dart';
-import 'package:flutter_rust_app/src/rust/api/simple.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_app/src/rust/frb_generated.dart';
+import 'screens/dashboard_screen.dart';
+import 'screens/chain_builder_screen.dart';
+import 'services/config_manager.dart';
+import 'providers/vpn_state_provider.dart';
 
 Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ConfigManager.init(); // 初始化本地配置
   await RustLib.init();
-  runApp(const MyApp());
+  
+  final container = ProviderContainer();
+  setupConfigListeners(container);
+  
+  // 使用 UncontrolledProviderScope 包装 MyApp 以启用 Riverpod 且支持全局监听
+  runApp(UncontrolledProviderScope(
+    container: container,
+    child: const MyApp(),
+  ));
 }
 
 class MyApp extends StatelessWidget {
@@ -14,100 +27,61 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Rust App',
+      title: 'ProxyChain Core',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
+        fontFamily: 'Segoe UI', // 为了更好的跨平台字体展示
       ),
-      home: const MyHomePage(),
+      home: const MainLayout(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key});
+// 主层级布局，管理底部导航栏
+class MainLayout extends StatefulWidget {
+  const MainLayout({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<MainLayout> createState() => _MainLayoutState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  String _greeting = 'Loading...';
-  ProxyChain? _mockChain;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadGreeting();
-    _loadMockChain();
-  }
-
-  void _loadGreeting() {
-    // 调用 Rust 的 greet 函数
-    final result = greet(name: 'Flutter Developer');
-    setState(() {
-      _greeting = result;
-    });
-  }
-
-  void _loadMockChain() {
-    // 调用 Rust 生成的 Mock 代理链
-    final result = createMockChain();
-    setState(() {
-      _mockChain = result;
-    });
-  }
+class _MainLayoutState extends State<MainLayout> {
+  int _currentIndex = 0;
+  
+  // 管理底部的两个屏幕
+  final _screens = const [
+    DashboardScreen(),
+    ChainBuilderScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('ProxyChain-Core'),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              _greeting,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 30),
-            if (_mockChain != null) ...[
-              const Text(
-                'Mock Proxy Chain Loaded:',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 10),
-              _buildNodeCard("Entry Node", _mockChain!.entryNode),
-              const Icon(Icons.arrow_downward, size: 30, color: Colors.grey),
-              _buildNodeCard("Exit Node", _mockChain!.exitNode),
-            ] else
-              const CircularProgressIndicator(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNodeCard(String title, ProxyNode node) {
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-      child: Padding(
-        padding: const EdgeInsets.all(15.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
-            const Divider(),
-            Text('ID: ${node.id}'),
-            Text('Name: ${node.name}'),
-            Text('Protocol: ${node.protocol.name}'),
-            Text('Server: ${node.server}:${node.port}'),
-            if (node.cipher != null) Text('Cipher: ${node.cipher}'),
-          ],
-        ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        selectedItemColor: Colors.deepPurple,
+        unselectedItemColor: Colors.grey,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard),
+            label: 'Dashboard',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.link),
+            label: 'Chain Builder',
+          ),
+        ],
       ),
     );
   }
