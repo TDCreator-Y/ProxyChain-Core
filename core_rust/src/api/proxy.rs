@@ -50,11 +50,11 @@ pub enum TrafficMsg {
     Down(u64),
 }
 
-trait ProxyIoStream: AsyncRead + AsyncWrite + Unpin + Send {}
+pub(crate) trait ProxyIoStream: AsyncRead + AsyncWrite + Unpin + Send {}
 
 impl<T> ProxyIoStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
-type BoxProxyStream = Box<dyn ProxyIoStream>;
+pub(crate) type BoxProxyStream = Box<dyn ProxyIoStream>;
 
 static TOKIO_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 static ENGINE_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -263,7 +263,7 @@ async fn connect_to_proxy_node(
         .await
         .map_err(|err| format!("failed to connect to proxy node {} ({}): {err}", node.name, addr))?;
 
-    match node.protocol {
+    match &node.protocol {
         ProxyProtocol::Socks5 => {
             let mut stream = stream;
             socks5_handshake(&mut stream).await?;
@@ -532,7 +532,8 @@ fn connect_to_shadowsocks_node(
         .map_err(|err| format!("invalid shadowsocks cipher for {}: {err}", node.name))?;
     let server_addr = SsServerAddr::from_str(&format!("{}:{}", node.server, node.port))
         .map_err(|err| format!("invalid shadowsocks server address for {}: {err}", node.name))?;
-    let server_config = SsServerConfig::new(server_addr, node.password.clone(), method);
+    let server_config = SsServerConfig::new(server_addr, node.password.clone(), method)
+        .map_err(|err| format!("failed to build shadowsocks config for {}: {err}", node.name))?;
     let context = SsContext::new_shared(SsServerType::Local);
     let target_addr = to_shadowsocks_address(target);
     let stream = ProxyClientStream::from_stream(context, stream, &server_config, target_addr);
