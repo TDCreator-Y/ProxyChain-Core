@@ -561,3 +561,31 @@ fn to_shadowsocks_address(target: &TargetAddr) -> SsAddress {
         TargetAddr::Domain(host, port) => SsAddress::DomainNameAddress(host.clone(), *port),
     }
 }
+
+pub async fn test_chain_latency(entry: ProxyNode, exit: ProxyNode) -> Result<i32, String> {
+    let chain = ProxyChain {
+        entry_node: entry,
+        exit_node: exit,
+    };
+    
+    let start_time = std::time::Instant::now();
+    let target = TargetAddr::Domain("www.gstatic.com".to_string(), 80);
+    
+    let mut stream = connect_via_chain(&chain, &target)
+        .await
+        .map_err(|e| format!("Failed to connect via chain: {}", e))?;
+
+    let req = b"GET /generate_204 HTTP/1.1\r\nHost: www.gstatic.com\r\nConnection: close\r\n\r\n";
+    stream.write_all(req).await.map_err(|e| format!("Failed to send HTTP request: {}", e))?;
+
+    let mut buf = [0u8; 1024];
+    let n = stream.read(&mut buf).await.map_err(|e| format!("Failed to read HTTP response: {}", e))?;
+    let response = String::from_utf8_lossy(&buf[..n]);
+
+    if response.starts_with("HTTP/1.1 204") || response.starts_with("HTTP/1.0 204") {
+        let elapsed = start_time.elapsed().as_millis() as i32;
+        Ok(elapsed)
+    } else {
+        Err(format!("Invalid response from server: {}", response))
+    }
+}

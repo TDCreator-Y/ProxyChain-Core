@@ -3,45 +3,147 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_app/src/rust/api/proxy.dart';
 import '../providers/vpn_state_provider.dart';
 
-class ChainBuilderScreen extends ConsumerWidget {
+class ChainBuilderScreen extends ConsumerStatefulWidget {
   const ChainBuilderScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChainBuilderScreen> createState() => _ChainBuilderScreenState();
+}
+
+class _ChainBuilderScreenState extends ConsumerState<ChainBuilderScreen> {
+  bool _isTestingLatency = false;
+  String? _latencyResult;
+  bool _isLatencyError = false;
+
+  Future<void> _testLatency(ProxyNode entry, ProxyNode exit) async {
+    setState(() {
+      _isTestingLatency = true;
+      _latencyResult = null;
+      _isLatencyError = false;
+    });
+
+    try {
+      final latency = await testChainLatency(entry: entry, exit: exit);
+      if (mounted) {
+        setState(() {
+          _isTestingLatency = false;
+          _latencyResult = '${latency} ms';
+          _isLatencyError = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isTestingLatency = false;
+          _latencyResult = 'Timeout';
+          _isLatencyError = true;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final entryPool = ref.watch(entryPoolProvider);
     final exitPool = ref.watch(exitPoolProvider);
+    final selectedEntry = ref.watch(selectedEntryNodeProvider);
+    final selectedExit = ref.watch(selectedExitNodeProvider);
 
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('代理链构建', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '代理链构建',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Row(
+        child: Column(
           children: [
-            // 区域一：Entry Pool
             Expanded(
-              child: _buildPoolColumn(
-                context, 
-                ref, 
-                title: '入口节点 (VPN)', 
-                nodes: entryPool, 
-                isEntry: true
+              child: Row(
+                children: [
+                  // 区域一：Entry Pool
+                  Expanded(
+                    child: _buildPoolColumn(
+                      context,
+                      ref,
+                      title: '入口节点 (VPN)',
+                      nodes: entryPool,
+                      isEntry: true,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  // 区域二：Exit Pool
+                  Expanded(
+                    child: _buildPoolColumn(
+                      context,
+                      ref,
+                      title: '出口节点 (ISP)',
+                      nodes: exitPool,
+                      isEntry: false,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 16),
-            // 区域二：Exit Pool
-            Expanded(
-              child: _buildPoolColumn(
-                context, 
-                ref, 
-                title: '出口节点 (ISP)', 
-                nodes: exitPool, 
-                isEntry: false
+            const SizedBox(height: 16),
+            // 测速区域
+            Container(
+              padding: const EdgeInsets.all(16.0),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 5,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed:
+                        (selectedEntry != null &&
+                            selectedExit != null &&
+                            !_isTestingLatency)
+                        ? () => _testLatency(selectedEntry, selectedExit)
+                        : null,
+                    icon: _isTestingLatency
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.speed),
+                    label: const Text('测速'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  if (_latencyResult != null) ...[
+                    const SizedBox(width: 16),
+                    Text(
+                      _latencyResult!,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: _isLatencyError ? Colors.red : Colors.green,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
@@ -50,8 +152,16 @@ class ChainBuilderScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildPoolColumn(BuildContext context, WidgetRef ref, {required String title, required List<ProxyNode> nodes, required bool isEntry}) {
-    final selectedNode = isEntry ? ref.watch(selectedEntryNodeProvider) : ref.watch(selectedExitNodeProvider);
+  Widget _buildPoolColumn(
+    BuildContext context,
+    WidgetRef ref, {
+    required String title,
+    required List<ProxyNode> nodes,
+    required bool isEntry,
+  }) {
+    final selectedNode = isEntry
+        ? ref.watch(selectedEntryNodeProvider)
+        : ref.watch(selectedExitNodeProvider);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -60,7 +170,11 @@ class ChainBuilderScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
           child: Text(
             title,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepPurple),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.deepPurple,
+            ),
           ),
         ),
         Expanded(
@@ -69,7 +183,13 @@ class ChainBuilderScreen extends ConsumerWidget {
             itemBuilder: (context, index) {
               final node = nodes[index];
               final isSelected = selectedNode?.id == node.id;
-              return _buildNodeCard(context, ref, node: node, isSelected: isSelected, isEntry: isEntry);
+              return _buildNodeCard(
+                context,
+                ref,
+                node: node,
+                isSelected: isSelected,
+                isEntry: isEntry,
+              );
             },
           ),
         ),
@@ -77,7 +197,13 @@ class ChainBuilderScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildNodeCard(BuildContext context, WidgetRef ref, {required ProxyNode node, required bool isSelected, required bool isEntry}) {
+  Widget _buildNodeCard(
+    BuildContext context,
+    WidgetRef ref, {
+    required ProxyNode node,
+    required bool isSelected,
+    required bool isEntry,
+  }) {
     return GestureDetector(
       onTap: () {
         // 点击卡片更新 Riverpod 状态
@@ -103,7 +229,7 @@ class ChainBuilderScreen extends ConsumerWidget {
                 color: Colors.black.withOpacity(0.05),
                 blurRadius: 5,
                 spreadRadius: 1,
-              )
+              ),
           ],
         ),
         child: ListTile(
@@ -123,11 +249,15 @@ class ChainBuilderScreen extends ConsumerWidget {
             node.protocol.name.toUpperCase(),
             style: TextStyle(
               fontSize: 12,
-              color: isSelected ? Colors.deepPurple.withOpacity(0.7) : Colors.grey,
+              color: isSelected
+                  ? Colors.deepPurple.withOpacity(0.7)
+                  : Colors.grey,
             ),
           ),
           // 选中状态显示对勾
-          trailing: isSelected ? const Icon(Icons.check_circle, color: Colors.deepPurple) : null,
+          trailing: isSelected
+              ? const Icon(Icons.check_circle, color: Colors.deepPurple)
+              : null,
         ),
       ),
     );
@@ -136,12 +266,28 @@ class ChainBuilderScreen extends ConsumerWidget {
   // 简单的辅助函数，用来模拟国旗展示
   String _getFlag(String name) {
     final lower = name.toLowerCase();
-    if (lower.contains('hk') || lower.contains('hong kong') || lower.contains('香港')) return '🇭🇰';
-    if (lower.contains('jp') || lower.contains('japan') || lower.contains('日本')) return '🇯🇵';
-    if (lower.contains('sg') || lower.contains('singapore') || lower.contains('新加坡')) return '🇸🇬';
-    if (lower.contains('us') || lower.contains('united states') || lower.contains('美国')) return '🇺🇸';
-    if (lower.contains('uk') || lower.contains('united kingdom') || lower.contains('英国')) return '🇬🇧';
-    if (lower.contains('tw') || lower.contains('taiwan') || lower.contains('台湾')) return '🇹🇼';
+    if (lower.contains('hk') ||
+        lower.contains('hong kong') ||
+        lower.contains('香港'))
+      return '🇭🇰';
+    if (lower.contains('jp') || lower.contains('japan') || lower.contains('日本'))
+      return '🇯🇵';
+    if (lower.contains('sg') ||
+        lower.contains('singapore') ||
+        lower.contains('新加坡'))
+      return '🇸🇬';
+    if (lower.contains('us') ||
+        lower.contains('united states') ||
+        lower.contains('美国'))
+      return '🇺🇸';
+    if (lower.contains('uk') ||
+        lower.contains('united kingdom') ||
+        lower.contains('英国'))
+      return '🇬🇧';
+    if (lower.contains('tw') ||
+        lower.contains('taiwan') ||
+        lower.contains('台湾'))
+      return '🇹🇼';
     return '🌐';
   }
 }

@@ -91,6 +91,11 @@ abstract class RustLibApi extends BaseApi {
     required ProxyNode exitNode,
   });
 
+  Future<int> crateApiProxyTestChainLatency({
+    required ProxyNode entry,
+    required ProxyNode exit,
+  });
+
   void crateApiProxyStopEngine();
 }
 
@@ -215,6 +220,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     debugName: "start_engine",
     argNames: ["entryNode", "exitNode", "sink"],
   );
+
+  @override
+  Future<int> crateApiProxyTestChainLatency({
+    required ProxyNode entry,
+    required ProxyNode exit,
+  }) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_proxy_node(entry, serializer);
+        sse_encode_box_autoadd_proxy_node(exit, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 6, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_i_32,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiProxyTestChainLatencyConstMeta,
+      argValues: [entry, exit],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiProxyTestChainLatencyConstMeta =>
+      const TaskConstMeta(
+        debugName: "test_chain_latency",
+        argNames: ["entry", "exit"],
+      );
 
   @override
   void crateApiProxyStopEngine() {

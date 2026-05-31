@@ -23,6 +23,14 @@ Stream<TrafficStatus> startEngine({
   exitNode: exitNode,
 );
 
+Future<int> testChainLatency({
+  required ProxyNode entry,
+  required ProxyNode exit,
+}) => RustLib.instance.api.crateApiProxyTestChainLatency(
+  entry: entry,
+  exit: exit,
+);
+
 class ProxyChain {
   final ProxyNode entryNode;
   final ProxyNode exitNode;

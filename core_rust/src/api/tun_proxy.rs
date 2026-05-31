@@ -1,13 +1,14 @@
 use crate::api::proxy::{connect_via_chain, ProxyChain, TargetAddr, TrafficMsg};
 use ipstack::{IpStack, IpStackConfig, IpStackStream};
 use smoltcp::wire::{IpProtocol, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket};
-use std::net::{IpAddr, Ipv4Addr};
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tokio::net::lookup_host;
+use tokio::net::{lookup_host, TcpStream};
 use tokio::sync::mpsc;
 use tun::Configuration;
 
@@ -15,9 +16,13 @@ const TUN_NAME: &str = "proxy_tun";
 const TUN_IPV4: Ipv4Addr = Ipv4Addr::new(198, 18, 0, 1);
 const TUN_NETMASK: Ipv4Addr = Ipv4Addr::new(255, 255, 0, 0);
 const TUN_DEFAULT_GATEWAY: &str = "198.18.0.1";
+const FAKE_IP_NETWORK: [u8; 2] = [198, 18];
+const FAKE_IP_START_HOST: u32 = 2;
+const FAKE_IP_END_HOST: u32 = 0xfffe;
 const MTU: u16 = 1500;
 
 static TUN_RUNTIME: OnceLock<Mutex<Option<TunRuntimeState>>> = OnceLock::new();
+static FAKE_IP_STATE: OnceLock<Mutex<FakeIpState>> = OnceLock::new();
 
 #[derive(Clone, Debug)]
 struct RouteCommand {
@@ -35,6 +40,24 @@ struct PacketMetadata {
     transport: &'static str,
     destination: String,
     port: u16,
+    dns_query: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct FakeIpState {
+    domain_to_fake: HashMap<String, Ipv4Addr>,
+    fake_to_domain: HashMap<Ipv4Addr, String>,
+    next_host: u32,
+}
+
+#[derive(Clone, Debug)]
+struct DnsQuestion {
+    id: u16,
+    flags: u16,
+    name: String,
+    qtype: u16,
+    qclass: u16,
+    question_bytes: Vec<u8>,
 }
 
 struct PacketTrackedDevice<T> {
@@ -132,10 +155,17 @@ pub(crate) async fn start_tun(chain: ProxyChain, tx: mpsc::Sender<TrafficMsg>) -
     let (metadata_tx, mut metadata_rx) = mpsc::unbounded_channel::<PacketMetadata>();
     tokio::spawn(async move {
         while let Some(meta) = metadata_rx.recv().await {
-            eprintln!(
-                "TUN packet observed: {} {}:{}",
-                meta.transport, meta.destination, meta.port
-            );
+            if let Some(domain) = meta.dns_query {
+                eprintln!(
+                    "TUN DNS query observed: {} {}:{} -> {}",
+                    meta.transport, meta.destination, meta.port, domain
+                );
+            } else {
+                eprintln!(
+                    "TUN packet observed: {} {}:{}",
+                    meta.transport, meta.destination, meta.port
+                );
+            }
         }
     });
 
@@ -155,11 +185,19 @@ pub(crate) async fn start_tun(chain: ProxyChain, tx: mpsc::Sender<TrafficMsg>) -
         match stream {
             IpStackStream::Tcp(tcp) => {
                 tokio::spawn(async move {
-                    let target_addr = tcp.local_addr();
-                    let nested_stream = match connect_via_chain(&chain_clone, &TargetAddr::Ip(target_addr)).await {
+                    let original_target = resolve_original_tcp_destination(tcp.local_addr(), tcp.peer_addr());
+                    let should_direct = match original_target.ip() {
+                        IpAddr::V4(ip) => should_bypass(&ip),
+                        IpAddr::V6(_) => false,
+                    };
+                    let target_addr = resolve_tcp_target_addr(tcp.local_addr(), tcp.peer_addr());
+                    let nested_stream = match connect_tcp_upstream(&chain_clone, original_target, &target_addr, should_direct).await {
                         Ok(stream) => stream,
                         Err(err) => {
-                            eprintln!("failed to connect via chain for TCP {target_addr}: {err}");
+                            eprintln!(
+                                "failed to establish TCP upstream for original target {} / routed target {:?}: {err}",
+                                original_target, target_addr
+                            );
                             return;
                         }
                     };
@@ -202,10 +240,9 @@ pub(crate) async fn start_tun(chain: ProxyChain, tx: mpsc::Sender<TrafficMsg>) -
             }
             IpStackStream::Udp(udp) => {
                 tokio::spawn(async move {
-                    eprintln!(
-                        "UDP flow observed for {} but UDP relay is not implemented yet",
-                        udp.local_addr()
-                    );
+                    if let Err(err) = handle_udp_stream(udp).await {
+                        eprintln!("UDP flow handling failed: {err}");
+                    }
                 });
             }
             IpStackStream::UnknownNetwork(_) => {}
@@ -224,6 +261,7 @@ pub(crate) fn stop_tun() {
             }
         }
     }
+    clear_fake_ip_state();
 }
 
 fn parse_packet_metadata(packet: &[u8]) -> Option<PacketMetadata> {
@@ -258,18 +296,282 @@ fn parse_transport_metadata(
                 transport: "tcp",
                 destination,
                 port: packet.dst_port(),
+                dns_query: None,
             })
         }
         IpProtocol::Udp => {
             let packet = UdpPacket::new_checked(payload).ok()?;
+            let dns_query = if packet.dst_port() == 53 {
+                parse_dns_query(packet.payload()).map(|query| query.name)
+            } else {
+                None
+            };
             Some(PacketMetadata {
                 transport: "udp",
                 destination,
                 port: packet.dst_port(),
+                dns_query,
             })
         }
         _ => None,
     }
+}
+
+async fn handle_udp_stream(mut udp: ipstack::IpStackUdpStream) -> Result<(), String> {
+    let local_addr = udp.local_addr();
+    let peer_addr = udp.peer_addr();
+    let mut buf = vec![0u8; 2048];
+
+    loop {
+        let n = udp
+            .read(&mut buf)
+            .await
+            .map_err(|err| format!("failed to read UDP payload for {peer_addr}: {err}"))?;
+        if n == 0 {
+            return Ok(());
+        }
+
+        let payload = &buf[..n];
+        let dns_port_hit = local_addr.port() == 53 || peer_addr.port() == 53;
+        if !dns_port_hit {
+            eprintln!("UDP flow observed for {peer_addr} but UDP relay is not implemented yet");
+            continue;
+        }
+
+        let Some(query) = parse_dns_query(payload) else {
+            eprintln!("UDP/53 payload for {peer_addr} is not a supported DNS query");
+            continue;
+        };
+
+        let fake_ip = if should_answer_with_fake_ip(&query) {
+            Some(allocate_fake_ip(&query.name)?)
+        } else {
+            None
+        };
+
+        let response = build_dns_response(&query, fake_ip);
+        udp.write_all(&response)
+            .await
+            .map_err(|err| format!("failed to write DNS response for {}: {err}", query.name))?;
+
+        if let Some(fake_ip) = fake_ip {
+            eprintln!("Fake-IP assigned: {} -> {}", query.name, fake_ip);
+        }
+    }
+}
+
+fn should_answer_with_fake_ip(query: &DnsQuestion) -> bool {
+    query.qclass == 1 && matches!(query.qtype, 1 | 255)
+}
+
+fn parse_dns_query(payload: &[u8]) -> Option<DnsQuestion> {
+    if payload.len() < 12 {
+        return None;
+    }
+
+    let id = u16::from_be_bytes([payload[0], payload[1]]);
+    let flags = u16::from_be_bytes([payload[2], payload[3]]);
+    let qdcount = u16::from_be_bytes([payload[4], payload[5]]);
+    if flags & 0x8000 != 0 || qdcount == 0 {
+        return None;
+    }
+
+    let (name, cursor) = parse_dns_name(payload, 12)?;
+    if payload.len() < cursor + 4 {
+        return None;
+    }
+
+    let qtype = u16::from_be_bytes([payload[cursor], payload[cursor + 1]]);
+    let qclass = u16::from_be_bytes([payload[cursor + 2], payload[cursor + 3]]);
+    let question_end = cursor + 4;
+
+    Some(DnsQuestion {
+        id,
+        flags,
+        name,
+        qtype,
+        qclass,
+        question_bytes: payload[12..question_end].to_vec(),
+    })
+}
+
+fn parse_dns_name(payload: &[u8], offset: usize) -> Option<(String, usize)> {
+    let mut cursor = offset;
+    let mut labels = Vec::new();
+
+    loop {
+        let len = *payload.get(cursor)? as usize;
+        cursor += 1;
+
+        if len == 0 {
+            break;
+        }
+        if len & 0b1100_0000 != 0 {
+            return None;
+        }
+        if payload.len() < cursor + len {
+            return None;
+        }
+
+        let label = std::str::from_utf8(&payload[cursor..cursor + len]).ok()?;
+        labels.push(label.to_string());
+        cursor += len;
+    }
+
+    Some((labels.join("."), cursor))
+}
+
+fn build_dns_response(query: &DnsQuestion, fake_ip: Option<Ipv4Addr>) -> Vec<u8> {
+    let mut response = Vec::with_capacity(64);
+    response.extend_from_slice(&query.id.to_be_bytes());
+
+    let recursion_desired = query.flags & 0x0100;
+    let response_flags = 0x8000 | 0x0080 | recursion_desired;
+    response.extend_from_slice(&response_flags.to_be_bytes());
+    response.extend_from_slice(&1u16.to_be_bytes());
+    response.extend_from_slice(&(fake_ip.is_some() as u16).to_be_bytes());
+    response.extend_from_slice(&0u16.to_be_bytes());
+    response.extend_from_slice(&0u16.to_be_bytes());
+    response.extend_from_slice(&query.question_bytes);
+
+    if let Some(fake_ip) = fake_ip {
+        response.extend_from_slice(&0xc00cu16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&60u32.to_be_bytes());
+        response.extend_from_slice(&4u16.to_be_bytes());
+        response.extend_from_slice(&fake_ip.octets());
+    }
+
+    response
+}
+
+async fn connect_tcp_upstream(
+    chain: &ProxyChain,
+    original_target: SocketAddr,
+    routed_target: &TargetAddr,
+    should_direct: bool,
+) -> Result<Box<dyn crate::api::proxy::ProxyIoStream>, String> {
+    if should_direct {
+        let stream = TcpStream::connect(original_target)
+            .await
+            .map_err(|err| format!("failed to bypass-connect to {original_target}: {err}"))?;
+        return Ok(Box::new(stream));
+    }
+
+    connect_via_chain(chain, routed_target).await
+}
+
+fn resolve_original_tcp_destination(local_addr: SocketAddr, peer_addr: SocketAddr) -> SocketAddr {
+    if peer_addr.ip() != IpAddr::V4(TUN_IPV4) {
+        return peer_addr;
+    }
+
+    local_addr
+}
+
+fn resolve_tcp_target_addr(local_addr: SocketAddr, peer_addr: SocketAddr) -> TargetAddr {
+    for candidate in [peer_addr, local_addr] {
+        if let IpAddr::V4(ip) = candidate.ip() {
+            if let Some(domain) = lookup_fake_ip_domain(ip) {
+                return TargetAddr::Domain(domain, candidate.port());
+            }
+        }
+    }
+
+    if peer_addr.ip() != IpAddr::V4(TUN_IPV4) {
+        return TargetAddr::Ip(peer_addr);
+    }
+
+    TargetAddr::Ip(local_addr)
+}
+
+fn should_bypass(ip: &Ipv4Addr) -> bool {
+    is_lan_ip(ip) || is_cn_ip(ip)
+}
+
+fn is_lan_ip(ip: &Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    if octets[0] == 127 {
+        return true;
+    }
+    if octets[0] == 10 {
+        return true;
+    }
+    if octets[0] == 192 && octets[1] == 168 {
+        return true;
+    }
+    if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+        return true;
+    }
+    false
+}
+
+fn is_cn_ip(_ip: &Ipv4Addr) -> bool {
+    // GeoIP 占位：后续可替换为读取本地 `cn_ip.txt` 或更完整的 CIDR 匹配。
+    false
+}
+
+fn allocate_fake_ip(domain: &str) -> Result<Ipv4Addr, String> {
+    let mut state = fake_ip_state().lock().unwrap();
+    if let Some(existing) = state.domain_to_fake.get(domain) {
+        return Ok(*existing);
+    }
+
+    if state.next_host == 0 {
+        state.next_host = FAKE_IP_START_HOST;
+    }
+
+    let start_host = state.next_host;
+    loop {
+        if state.next_host > FAKE_IP_END_HOST {
+            state.next_host = FAKE_IP_START_HOST;
+        }
+
+        let candidate = fake_ip_from_host(state.next_host);
+        state.next_host += 1;
+
+        if !state.fake_to_domain.contains_key(&candidate) {
+            state.domain_to_fake.insert(domain.to_string(), candidate);
+            state.fake_to_domain.insert(candidate, domain.to_string());
+            return Ok(candidate);
+        }
+
+        if state.next_host == start_host {
+            break;
+        }
+    }
+
+    Err("fake-ip address pool is exhausted".to_string())
+}
+
+fn lookup_fake_ip_domain(fake_ip: Ipv4Addr) -> Option<String> {
+    fake_ip_state()
+        .lock()
+        .unwrap()
+        .fake_to_domain
+        .get(&fake_ip)
+        .cloned()
+}
+
+fn clear_fake_ip_state() {
+    let mut state = fake_ip_state().lock().unwrap();
+    state.domain_to_fake.clear();
+    state.fake_to_domain.clear();
+    state.next_host = 0;
+}
+
+fn fake_ip_state() -> &'static Mutex<FakeIpState> {
+    FAKE_IP_STATE.get_or_init(|| Mutex::new(FakeIpState::default()))
+}
+
+fn fake_ip_from_host(host: u32) -> Ipv4Addr {
+    Ipv4Addr::new(
+        FAKE_IP_NETWORK[0],
+        FAKE_IP_NETWORK[1],
+        ((host >> 8) & 0xff) as u8,
+        (host & 0xff) as u8,
+    )
 }
 
 async fn install_routes(entry_server: &str, entry_port: u16) -> Result<TunRuntimeState, String> {

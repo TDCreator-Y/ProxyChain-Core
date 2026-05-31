@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_app/src/rust/api/proxy.dart';
 import '../services/config_manager.dart';
+import '../utils/privilege_util.dart';
 
 // VPN 状态枚举
 enum VpnConnectionState { disconnected, connecting, connected }
@@ -22,7 +23,17 @@ class VpnController extends StateNotifier<VpnConnectionState> {
     state = VpnConnectionState.connecting;
 
     try {
-      final trafficStream = startEngine(entryNode: entryNode, exitNode: exitNode);
+      // 检查提权逻辑：如果没有管理员/root权限，PrivilegeUtil会尝试弹窗并重启App，当前进程随即终止。
+      final isElevated = await PrivilegeUtil.checkAndElevate();
+      if (!isElevated) {
+        // App 正在重启，中断当前流程
+        return;
+      }
+
+      final trafficStream = startEngine(
+        entryNode: entryNode,
+        exitNode: exitNode,
+      );
       ref.read(engineTrafficSourceProvider.notifier).state = trafficStream;
       state = VpnConnectionState.connected;
     } catch (error) {
@@ -82,19 +93,19 @@ void setupConfigListeners(ProviderContainer container) {
   container.listen(selectedEntryNodeProvider, (previous, next) {
     if (next != null) ConfigManager.saveEntryNode(next);
   });
-  
+
   container.listen(selectedExitNodeProvider, (previous, next) {
     if (next != null) ConfigManager.saveExitNode(next);
   });
-  
+
   container.listen(exitPoolProvider, (previous, next) {
     ConfigManager.saveExitNodesList(next);
   });
-  
+
   container.listen(entryPoolProvider, (previous, next) {
     ConfigManager.saveEntryNodesList(next);
   });
-  
+
   container.listen(subscriptionUrlProvider, (previous, next) {
     ConfigManager.saveSubscriptionUrl(next);
   });
@@ -104,7 +115,7 @@ void setupConfigListeners(ProviderContainer container) {
 final activeChainProvider = Provider<ProxyChain?>((ref) {
   final entry = ref.watch(selectedEntryNodeProvider);
   final exit = ref.watch(selectedExitNodeProvider);
-  
+
   if (entry != null && exit != null) {
     return ProxyChain(entryNode: entry, exitNode: exit);
   }
@@ -122,7 +133,10 @@ class TrafficData {
 
 class TrafficHistoryNotifier extends StateNotifier<List<TrafficData>> {
   TrafficHistoryNotifier(this.ref) : super([]) {
-    ref.listen<AsyncValue<TrafficData>>(trafficStreamProvider, (previous, next) {
+    ref.listen<AsyncValue<TrafficData>>(trafficStreamProvider, (
+      previous,
+      next,
+    ) {
       final vpnState = ref.read(vpnStateProvider);
       if (vpnState != VpnConnectionState.connected) {
         return;
