@@ -40,5 +40,20 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 # linker-generated default UAC snippet to avoid manifest merge conflicts.
 target_link_options(${BINARY_NAME} PRIVATE "/MANIFESTUAC:NO")
 
+# 确保运行时能找到 wintun.dll
+set(WINTUN_DLL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../core_rust/target/debug/examples/wintun.dll")
+if(NOT EXISTS "${WINTUN_DLL_PATH}")
+    file(GLOB_RECURSE WINTUN_CANDIDATES "${CMAKE_CURRENT_SOURCE_DIR}/../../build/windows/x64/plugins/rust_lib_flutter_rust_app/cargokit_build/*/wintun.dll")
+    list(GET WINTUN_CANDIDATES 0 WINTUN_DLL_PATH)
+endif()
+
+if(EXISTS "${WINTUN_DLL_PATH}")
+    add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${WINTUN_DLL_PATH}"
+        "$<TARGET_FILE_DIR:${BINARY_NAME}>/"
+    )
+endif()
+
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

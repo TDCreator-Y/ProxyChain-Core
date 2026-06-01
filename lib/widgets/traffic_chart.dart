@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,34 +12,74 @@ class TrafficChart extends ConsumerStatefulWidget {
 }
 
 class _TrafficChartState extends ConsumerState<TrafficChart> {
-  final List<TrafficData> _dataPoints = [];
-  final int _maxDataPoints = 30; // 屏幕上最多显示30秒的数据
+  bool _isTimeout = false;
+  Timer? _timer;
+  VpnConnectionState _lastVpnState = VpnConnectionState.disconnected;
 
   @override
-  Widget build(BuildContext context) {
-    // 监听流量数据流
-    ref.listen<AsyncValue<TrafficData>>(trafficStreamProvider, (
-      previous,
-      next,
-    ) {
-      if (next.hasValue && next.value != null) {
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _startTimeoutTimer() {
+    _timer?.cancel();
+    _isTimeout = false;
+    _timer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
         setState(() {
-          _dataPoints.add(next.value!);
-          if (_dataPoints.length > _maxDataPoints) {
-            _dataPoints.removeAt(0);
-          }
+          _isTimeout = true;
+          debugPrint('[TrafficChart] Loading timeout (3s) reached. Rendering empty chart.');
         });
       }
     });
+  }
 
-    if (_dataPoints.isEmpty) {
+  @override
+  Widget build(BuildContext context) {
+    final dataPoints = ref.watch(trafficHistoryProvider);
+    final vpnState = ref.watch(vpnStateProvider);
+
+    // 监听 VPN 状态变化，重新启动 loading 计时器
+    if (vpnState != _lastVpnState) {
+      _lastVpnState = vpnState;
+      if (vpnState == VpnConnectionState.connecting || 
+         (vpnState == VpnConnectionState.connected && dataPoints.isEmpty)) {
+        _startTimeoutTimer();
+      } else {
+        _timer?.cancel();
+        _isTimeout = false;
+      }
+    }
+
+    // 如果收到数据，取消超时状态
+    if (dataPoints.isNotEmpty && _timer != null && _timer!.isActive) {
+      _timer?.cancel();
+      _isTimeout = false;
+    }
+
+    // 验证 loading 状态管理：连接中或已连接但暂无数据时显示 loading
+    // 增加 3 秒超时容错，防止一直转圈
+    if ((vpnState == VpnConnectionState.connecting || 
+        (vpnState == VpnConnectionState.connected && dataPoints.isEmpty)) && 
+        !_isTimeout) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final minTime = _dataPoints.first.time.millisecondsSinceEpoch.toDouble();
-    final maxTime = _dataPoints.last.time.millisecondsSinceEpoch.toDouble();
-    // 如果数据点太少，给定一个最小的跨度避免图表报错
-    final timeRange = (maxTime - minTime) > 0 ? (maxTime - minTime) : 1000.0;
+    // 初始化占位数据，解决空数据时 fl_chart 渲染崩溃问题
+    final displayData = dataPoints.isEmpty
+        ? [TrafficData(0, 0, DateTime.now(), index: 0)]
+        : dataPoints;
+
+    final minX = displayData.first.index.toDouble();
+    final maxX = minX + 60;
+
+    double maxSpeed = 0;
+    for (var d in displayData) {
+      if (d.upSpeed > maxSpeed) maxSpeed = d.upSpeed;
+      if (d.downSpeed > maxSpeed) maxSpeed = d.downSpeed;
+    }
+    final maxY = maxSpeed > 0 ? maxSpeed * 1.2 : 100.0; // 预留 20%，最小100
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -71,17 +112,17 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
                 gridData: const FlGridData(show: false),
                 titlesData: const FlTitlesData(show: false),
                 borderData: FlBorderData(show: false),
-                minX: minTime,
-                maxX: minTime + timeRange,
+                minX: minX,
+                maxX: maxX,
                 minY: 0,
-                maxY: 2000, // 假设最大速度为 2000 KB/s，后期可动态计算
+                maxY: maxY,
                 lineBarsData: [
                   // 上行曲线 (绿色)
                   LineChartBarData(
-                    spots: _dataPoints
+                    spots: displayData
                         .map(
                           (e) => FlSpot(
-                            e.time.millisecondsSinceEpoch.toDouble(),
+                            e.index.toDouble(),
                             e.upSpeed,
                           ),
                         )
@@ -93,15 +134,22 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
                     dotData: const FlDotData(show: false),
                     belowBarData: BarAreaData(
                       show: true,
-                      color: Colors.green.withOpacity(0.2),
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.green.withOpacity(0.5),
+                          Colors.green.withOpacity(0.0),
+                        ],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
                     ),
                   ),
                   // 下行曲线 (蓝色)
                   LineChartBarData(
-                    spots: _dataPoints
+                    spots: displayData
                         .map(
                           (e) => FlSpot(
-                            e.time.millisecondsSinceEpoch.toDouble(),
+                            e.index.toDouble(),
                             e.downSpeed,
                           ),
                         )
@@ -113,7 +161,14 @@ class _TrafficChartState extends ConsumerState<TrafficChart> {
                     dotData: const FlDotData(show: false),
                     belowBarData: BarAreaData(
                       show: true,
-                      color: Colors.blue.withOpacity(0.2),
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.blue.withOpacity(0.5),
+                          Colors.blue.withOpacity(0.0),
+                        ],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
                     ),
                   ),
                 ],

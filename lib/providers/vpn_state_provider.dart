@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_app/src/rust/api/proxy.dart';
 import '../services/config_manager.dart';
@@ -127,51 +128,61 @@ class TrafficData {
   final double upSpeed; // KB/s
   final double downSpeed; // KB/s
   final DateTime time;
+  final int index;
 
-  TrafficData(this.upSpeed, this.downSpeed, this.time);
+  TrafficData(this.upSpeed, this.downSpeed, this.time, {this.index = 0});
+
+  TrafficData copyWith({
+    double? upSpeed,
+    double? downSpeed,
+    DateTime? time,
+    int? index,
+  }) {
+    return TrafficData(
+      upSpeed ?? this.upSpeed,
+      downSpeed ?? this.downSpeed,
+      time ?? this.time,
+      index: index ?? this.index,
+    );
+  }
 }
 
 class TrafficHistoryNotifier extends StateNotifier<List<TrafficData>> {
-  TrafficHistoryNotifier(this.ref) : super([]) {
-    ref.listen<AsyncValue<TrafficData>>(trafficStreamProvider, (
-      previous,
-      next,
-    ) {
-      final vpnState = ref.read(vpnStateProvider);
-      if (vpnState != VpnConnectionState.connected) {
-        return;
-      }
-
-      next.whenData(addTraffic);
-    });
-
-    ref.listen<VpnConnectionState>(vpnStateProvider, (previous, next) {
-      if (next == VpnConnectionState.disconnected) {
-        clear();
-      }
-    });
-  }
+  TrafficHistoryNotifier(this.ref) : super([]);
 
   final Ref ref;
   static const int _maxLength = 60;
+  int _counter = 0;
 
   void addTraffic(TrafficData data) {
-    final nextState = [...state, data];
-    if (nextState.length > _maxLength) {
-      state = nextState.sublist(nextState.length - _maxLength);
-      return;
-    }
-    state = nextState;
+    final newData = data.copyWith(index: _counter++);
+    state = [...state.skip(state.length >= _maxLength ? 1 : 0), newData];
   }
 
   void clear() {
     state = [];
+    _counter = 0;
   }
 }
 
 final trafficHistoryProvider =
     StateNotifierProvider<TrafficHistoryNotifier, List<TrafficData>>((ref) {
-      return TrafficHistoryNotifier(ref);
+      final notifier = TrafficHistoryNotifier(ref);
+      
+      ref.listen<AsyncValue<TrafficData>>(trafficStreamProvider, (previous, next) {
+        final vpnState = ref.read(vpnStateProvider);
+        if (vpnState == VpnConnectionState.connected) {
+          next.whenData(notifier.addTraffic);
+        }
+      });
+
+      ref.listen<VpnConnectionState>(vpnStateProvider, (previous, next) {
+        if (next == VpnConnectionState.disconnected) {
+          notifier.clear();
+        }
+      });
+      
+      return notifier;
     });
 
 final engineTrafficSourceProvider = StateProvider<Stream<TrafficStatus>?>(
@@ -188,6 +199,7 @@ final trafficStreamProvider = StreamProvider<TrafficData>((ref) async* {
   }
 
   try {
+    // 捕获并打印底层数据流的异常，排查请求/推送链路中的异常信息
     await for (final status in stream) {
       yield TrafficData(
         status.up.toInt() / 1024.0,
@@ -195,7 +207,9 @@ final trafficStreamProvider = StreamProvider<TrafficData>((ref) async* {
         DateTime.now(),
       );
     }
-  } catch (_) {
+  } catch (error, stackTrace) {
+    // 打印底层 Rust 数据流推送异常，便于排查时序和格式错误
+    debugPrint('[trafficStreamProvider] Error in traffic stream: $error\n$stackTrace');
     yield TrafficData(0, 0, DateTime.now());
   }
 });

@@ -106,3 +106,17 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# --- 针对 TUN 设备：自动拷贝 wintun.dll 到可执行文件同级目录 ---
+# 在 Windows 下，tun 库需要 wintun.dll
+set(WINTUN_DLL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../core_rust/target/debug/examples/wintun.dll")
+if(NOT EXISTS "${WINTUN_DLL_PATH}")
+    # 尝试从 release 目录或者 cargokit 目录获取
+    file(GLOB_RECURSE WINTUN_CANDIDATES "${CMAKE_CURRENT_SOURCE_DIR}/../build/windows/x64/plugins/rust_lib_flutter_rust_app/cargokit_build/*/wintun.dll")
+    list(GET WINTUN_CANDIDATES 0 WINTUN_DLL_PATH)
+endif()
+
+if(EXISTS "${WINTUN_DLL_PATH}")
+    install(FILES "${WINTUN_DLL_PATH}" DESTINATION "${CMAKE_INSTALL_PREFIX}"
+      COMPONENT Runtime)
+endif()
