@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bind_local_listener`, `connect_to_proxy_node`, `connect_via_chain`, `handle_inbound_client_with_metrics`, `read_socks5_frame`, `run_local_proxy_with_metrics`, `socks5_accept_client`, `socks5_connect`, `socks5_handshake`, `validate_proxy_node`, `validate_proxy_protocol`
+// These functions are ignored because they are not marked as `pub`: `bind_local_listener`, `connect_to_shadowsocks_stream`, `connect_via_chain`, `handle_inbound_client_with_metrics`, `handshake_proxy`, `read_socks5_frame`, `run_local_proxy_with_metrics`, `socks5_accept_client`, `socks5_connect`, `socks5_handshake`, `to_shadowsocks_address`, `validate_entry_protocol`, `validate_exit_protocol`, `validate_proxy_node`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Socks5Frame`, `TargetAddr`, `TrafficMsg`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`
 

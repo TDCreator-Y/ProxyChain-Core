@@ -4,10 +4,37 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import '../lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-import 'proxy.dart';
 
-// These functions are ignored because they are not marked as `pub`: `setup_routes`
+// These functions are ignored because they are not marked as `pub`: `allocate_fake_ip`, `build_dns_response`, `build_route_commands`, `clear_fake_ip_state`, `connect_tcp_upstream`, `discover_default_gateway`, `fake_ip_from_host`, `fake_ip_state`, `handle_udp_stream`, `install_routes`, `is_cn_ip`, `is_lan_ip`, `lookup_fake_ip_domain`, `new`, `parse_dns_name`, `parse_dns_query`, `parse_ipv4_metadata`, `parse_ipv6_metadata`, `parse_packet_metadata`, `parse_transport_metadata`, `replace_tun_state`, `resolve_entry_ipv4`, `resolve_original_tcp_destination`, `resolve_tcp_target_addr`, `run_command`, `should_answer_with_fake_ip`, `should_bypass`, `start_tun`, `stop_tun`, `tun_runtime`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DnsQuestion`, `PacketMetadata`, `PacketTrackedDevice`, `RouteCommand`, `TunCleanupGuard`, `TunRuntimeState`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `poll_flush`, `poll_read`, `poll_shutdown`, `poll_write`
 
-// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Sender < TrafficMsg >>>
-abstract class SenderTrafficMsg implements RustOpaqueInterface {}
+class FakeIpState {
+  final Map<String, Ipv4Addr> domainToFake;
+  final Map<Ipv4Addr, String> fakeToDomain;
+  final int nextHost;
+
+  const FakeIpState({
+    required this.domainToFake,
+    required this.fakeToDomain,
+    required this.nextHost,
+  });
+
+  static Future<FakeIpState> default_() =>
+      RustLib.instance.api.crateApiTunProxyFakeIpStateDefault();
+
+  @override
+  int get hashCode =>
+      domainToFake.hashCode ^ fakeToDomain.hashCode ^ nextHost.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FakeIpState &&
+          runtimeType == other.runtimeType &&
+          domainToFake == other.domainToFake &&
+          fakeToDomain == other.fakeToDomain &&
+          nextHost == other.nextHost;
+}

@@ -44,10 +44,10 @@ struct PacketMetadata {
 }
 
 #[derive(Debug, Default)]
-struct FakeIpState {
-    domain_to_fake: HashMap<String, Ipv4Addr>,
-    fake_to_domain: HashMap<Ipv4Addr, String>,
-    next_host: u32,
+pub struct FakeIpState {
+    pub domain_to_fake: HashMap<String, Ipv4Addr>,
+    pub fake_to_domain: HashMap<Ipv4Addr, String>,
+    pub next_host: u32,
 }
 
 #[derive(Clone, Debug)]
